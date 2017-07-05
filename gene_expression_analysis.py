@@ -430,6 +430,110 @@ def single(ctype,topological=False,distance=True):
 	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/figure1.pdf')
 	sns.plt.show()
 
+def what_genes():
+	from sklearn.tree import DecisionTreeRegressor
+	from sklearn.neural_network import MLPRegressor
+	from sklearn import svm
+	sns.set_style('whitegrid')
+	sns.set(font='Helvetica')
+	ctype='fc'
+	distance = True
+	topological = False
+
+	matrix = functional_connectivity(topological,distance,None)
+	matrix = np.tril(matrix,-1)
+	matrix = matrix + matrix.transpose()
+	pc = []
+	wcd = []
+	degree = []
+	for cost in [.15,.16,.17,.18,.19,.2]:
+		g = brain_graphs.matrix_to_igraph(matrix.copy(),cost=cost,mst=True)
+		g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+		pc.append(g.pc)
+		wcd.append(g.wmd)
+		degree.append(g.community.graph.strength(weights='weight'))
+	pc = np.nanmean(pc,axis=0)
+	wcd = np.nanmean(wcd,axis=0)
+	degree = np.nanmean(degree,axis=0)
+
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	membership = np.zeros((400)).astype(str)
+	yeo_df = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+
+	df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength'])
+	for node,name,pval,w,d in zip(range(400),membership,pc,wcd,degree):
+		try:
+			for gene in np.load('/home/despoB/mb3152/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,node))[-1]:
+				df= df.append(pd.DataFrame(np.array([[gene],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
+		except:
+			df= df.append(pd.DataFrame(np.array([[np.nan],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
+	df.gene = df.gene.astype(float)
+	df['participation coefficient'] = df['participation coefficient'].astype(float)
+	df['strength'] = df['strength'].astype(float)
+	df['within community strength'] = df['within community strength'].astype(float)
+
+	unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
+	features = np.zeros((400,len(unique)))
+	for node in range(400):
+		g_array = unique.copy()
+		for g in df.gene[df.node==node].values:
+			g_array[g_array==g] = True
+		g_array[g_array!=True] = False
+		features[node,:] = g_array
+	mask = np.sum(features,axis=1) == 101
+	size = len(mask[mask==True])
+	features = features[mask,:]
+	for measure,name in zip([wcd,degree],['wcd','degree']):
+		measure = measure[mask]
+		prediction = np.zeros((size))
+		for node in range(size):
+			# print node
+			model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=(3),alpha=1e-5,random_state=0)
+			# model = DecisionTreeRegressor(max_depth=5)
+			model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
+			prediction[node] = model.predict(features[node].reshape(1, -1))
+			print node,pearsonr(prediction[:node],measure[:node])
+
+		sns.jointplot(x=prediction, y=measure,kind="reg", color="r", size=7)
+		sns.plt.ylabel('participation coefficient')
+		sns.plt.xlabel('gene prediction of participation coefficient')
+		sns.plt.tight_layout()
+		sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_predict_%s.pdf'%(name))
+		sns.plt.show()
+
+	reduce_dict = {'VisCent':'Visual','VisPeri':'Visual','SomMotA':'Motor','SomMotB':'Motor','DorsAttnA':'Dorsal Attention','DorsAttnB':'Dorsal Attention','SalVentAttnA':'Ventral Attention','SalVentAttnB':'Ventral Attention','Limbic':'Limbic','ContA':'Control','ContB':'Control','ContC':'Control','DefaultA':'Default','DefaultB':'Default','DefaultC':'Default','TempPar':'Default'}
+	membership = np.zeros((400)).astype(str)
+	yeo_df = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	for i,n in enumerate(yeo_df):
+		membership[i] = reduce_dict[n.split('_')[2]]
+
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+
+	membership = membership[mask]
+	from sklearn.neural_network import MLPClassifier
+	prediction = np.zeros((size)).astype(str)
+	from sklearn.tree import DecisionTreeClassifier
+	for node in range(size):
+		# print node
+		model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=(100,),alpha=1e-5,random_state=0)
+		model.fit(features[np.arange(size)!=node],membership[np.arange(size)!=node])
+		p = model.predict(features[node].reshape(1, -1))[0]
+
+		prediction[node] = p
+		print float(len(prediction[prediction==membership]))/len(prediction[prediction!='0.0'])		
+	results = []
+	df = pd.DataFrame(np.array([prediction,membership]).transpose(),columns=['prediction','membership'])
+	for network in np.unique(membership):
+		temp_df = df[df.membership==network]
+		results.append(len(temp_df.membership[temp_df.membership==temp_df.prediction])/float(len(temp_df.membership))*100)
+	df = pd.DataFrame(np.array([results,np.unique(membership)]).transpose(),columns=['accuracy','network'])
+	df.accuracy = df.accuracy.astype(float)
+	sns.barplot(data=df,x='network',y='accuracy')
+	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_predict_network.pdf')
+
 def single(ctype,topological=False,distance=True):
 	df = pd.DataFrame(columns=['network','gene_co - fc'])
 	for network in ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']:
