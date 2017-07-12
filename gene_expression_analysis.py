@@ -76,7 +76,7 @@ def make_well_id_2_mni(subjects=['9861','178238266','178238316','178238373','156
 	global well_id_2_idx
 	global well_id_2_struct
 	template = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr0-2mm.nii.gz')
-	well_id_to_mni = pd.read_csv('/home/despoB/mb3152/alleninf/alleninf/data/corrected_mni_coordinates.csv')
+	well_id_to_mni = pd.read_csv('/home/despoB/mb3152/gene_expression/data/corrected_mni_coordinates.csv')
 	#list of all the genes in the project
 	# genes_df = pd.read_excel('/home/despoB/mb3152/allen_gene_expression/alleninf/data/Allen_Genes.xlsx','sheet1')
 	well_id_2_mni = {}
@@ -430,31 +430,71 @@ def single(ctype,topological=False,distance=True):
 	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/figure1.pdf')
 	sns.plt.show()
 
-def what_genes():
-	from sklearn.tree import DecisionTreeRegressor
-	from sklearn.neural_network import MLPRegressor
-	from sklearn import svm
+global features
+global measure
+global size
+global layers
+global layers_name
+
+from sklearn.neural_network import MLPRegressor
+def nn_regress(node):
+	global features
+	global measure
+	global layers
+	global size
+	print node
+	sys.stdout.flush()
+	model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=layers,alpha=1e-5,random_state=0)
+	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
+	return model.predict(features[node].reshape(1, -1))
+
+from sklearn.neural_network import MLPClassifier
+def nn_cater(node):
+	global features
+	global measure
+	global layers
+	global size
+	print node
+	sys.stdout.flush()
+	model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=layers,alpha=1e-5,random_state=0)
+	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
+	return model.predict(features[node].reshape(1, -1))
+
+def what_genes(cores):
+	global features
+	global measure
+	global layers
+	global layers_name
+	global size
 	sns.set_style('whitegrid')
 	sns.set(font='Helvetica')
 	ctype='fc'
 	distance = True
 	topological = False
 
-	matrix = functional_connectivity(topological,distance,None)
-	matrix = np.tril(matrix,-1)
-	matrix = matrix + matrix.transpose()
-	pc = []
-	wcd = []
-	degree = []
-	for cost in [.15,.16,.17,.18,.19,.2]:
-		g = brain_graphs.matrix_to_igraph(matrix.copy(),cost=cost,mst=True)
-		g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
-		pc.append(g.pc)
-		wcd.append(g.wmd)
-		degree.append(g.community.graph.strength(weights='weight'))
-	pc = np.nanmean(pc,axis=0)
-	wcd = np.nanmean(wcd,axis=0)
-	degree = np.nanmean(degree,axis=0)
+	try:
+		pc = np.load('/home/despoB/mb3152/gene_expression/results/pc.npy')
+		degree = np.load('/home/despoB/mb3152/gene_expression/results/degree.npy')
+		wcd = np.load('/home/despoB/mb3152/gene_expression/results/wcd.npy')
+	except:
+		matrix = functional_connectivity(topological,distance,None)
+		matrix = np.tril(matrix,-1)
+		matrix = matrix + matrix.transpose()
+		pc = []
+		wcd = []
+		degree = []
+		for cost in np.arange(150,201)*0.001:
+			g = brain_graphs.matrix_to_igraph(matrix.copy(),cost=cost,mst=True)
+			g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+			pc.append(g.pc)
+			wcd.append(g.wmd)
+			degree.append(g.community.graph.strength(weights='weight'))
+		pc = np.nanmean(pc,axis=0)
+		wcd = np.nanmean(wcd,axis=0)
+		degree = np.nanmean(degree,axis=0)
+		np.save('/home/despoB/mb3152/gene_expression/results/pc.npy',pc)
+		np.save('/home/despoB/mb3152/gene_expression/results/degree.npy',degree)
+		np.save('/home/despoB/mb3152/gene_expression/results/wcd.npy',wcd)
 
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	membership = np.zeros((400)).astype(str)
@@ -476,33 +516,18 @@ def what_genes():
 	df['within community strength'] = df['within community strength'].astype(float)
 
 	unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
-	features = np.zeros((400,len(unique)))
+	features = np.zeros((400,len(unique))).astype(bool)
 	for node in range(400):
-		g_array = unique.copy()
+		g_array = unique
+		g_b_array = unique.copy().astype(bool)
+		g_b_array[:] = False
 		for g in df.gene[df.node==node].values:
-			g_array[g_array==g] = True
-		g_array[g_array!=True] = False
-		features[node,:] = g_array
-	mask = np.sum(features,axis=1) == 101
+			g_b_array[g_array==g] = True
+		features[node,:] = g_b_array
+	features = features.astype(int)
+	mask = np.sum(features,axis=1) == 100
 	size = len(mask[mask==True])
 	features = features[mask,:]
-	for measure,name in zip([wcd,degree],['wcd','degree']):
-		measure = measure[mask]
-		prediction = np.zeros((size))
-		for node in range(size):
-			# print node
-			model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=(3),alpha=1e-5,random_state=0)
-			# model = DecisionTreeRegressor(max_depth=5)
-			model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
-			prediction[node] = model.predict(features[node].reshape(1, -1))
-			print node,pearsonr(prediction[:node],measure[:node])
-
-		sns.jointplot(x=prediction, y=measure,kind="reg", color="r", size=7)
-		sns.plt.ylabel('participation coefficient')
-		sns.plt.xlabel('gene prediction of participation coefficient')
-		sns.plt.tight_layout()
-		sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_predict_%s.pdf'%(name))
-		sns.plt.show()
 
 	reduce_dict = {'VisCent':'Visual','VisPeri':'Visual','SomMotA':'Motor','SomMotB':'Motor','DorsAttnA':'Dorsal Attention','DorsAttnB':'Dorsal Attention','SalVentAttnA':'Ventral Attention','SalVentAttnB':'Ventral Attention','Limbic':'Limbic','ContA':'Control','ContB':'Control','ContC':'Control','DefaultA':'Default','DefaultB':'Default','DefaultC':'Default','TempPar':'Default'}
 	membership = np.zeros((400)).astype(str)
@@ -510,29 +535,193 @@ def what_genes():
 	for i,n in enumerate(yeo_df):
 		membership[i] = reduce_dict[n.split('_')[2]]
 
-	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+	"""
+	testing 1,2 1,2
+	"""
+	# for measure,name in zip([pc,wcd,degree,membership],['pc','wcd','degree','network']):
+	# 	print name
+	# 	measure = measure[mask]
+	# 	results = []
+	# 	for i in range(3):
+	# 		m = np.zeros((len(measure))).astype(bool)
+	# 		m[np.random.choice(range(len(measure)),300,False)] = True
+	# 		if name == 'network': model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=(10,),alpha=1e-5,random_state=0)
+	# 		else:model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=(10,10,10,10,10,10,10,10,10,10,10,10,10,10),alpha=1e-5,random_state=0)
+	# 		model.fit(features[m],measure[m])
+	# 		if name =='network':
+	# 			prediction = model.predict(features[m==False])
+	# 			results.append(len(prediction[prediction==measure[m==False]]) / float(len(prediction)))
+	# 		else:results.append(pearsonr(model.predict(features[m==False]),measure[m==False])[0])
+	# 	print np.mean(results)
+	# np.save('/home/despoB/mb3152/gene_expression/results/nn%s%s.npy'%(layers_name,name),results)
 
+	"""
+	predict the nodal values of a node based on which genes maximize its fit to FC
+	"""
+	for measure,name in zip([pc,wcd,degree],['pc','wcd','degree']):
+	# for measure,name in zip([pc],['pc']):
+		measure = measure[mask]
+		pool = Pool(cores)
+		prediction = np.array(pool.map(nn_regress,range(size)))
+		np.save('/home/despoB/mb3152/gene_expression/results/nn%s_%s.npy'%(layers_name,name),prediction[:,0])
+
+	"""
+	predict the network memebership of the node based on which genes maximize its fit to FC
+	"""
 	membership = membership[mask]
-	from sklearn.neural_network import MLPClassifier
-	prediction = np.zeros((size)).astype(str)
-	from sklearn.tree import DecisionTreeClassifier
-	for node in range(size):
-		# print node
-		model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=(100,),alpha=1e-5,random_state=0)
-		model.fit(features[np.arange(size)!=node],membership[np.arange(size)!=node])
-		p = model.predict(features[node].reshape(1, -1))[0]
+	measure = membership
+	pool = Pool(cores)
+	prediction = np.array(pool.map(nn_cater,range(size)))
+	np.save('/home/despoB/mb3152/gene_expression/results/nn%s_network.npy'%(layers_name),prediction[:,0])
 
-		prediction[node] = p
-		print float(len(prediction[prediction==membership]))/len(prediction[prediction!='0.0'])		
-	results = []
-	df = pd.DataFrame(np.array([prediction,membership]).transpose(),columns=['prediction','membership'])
-	for network in np.unique(membership):
-		temp_df = df[df.membership==network]
-		results.append(len(temp_df.membership[temp_df.membership==temp_df.prediction])/float(len(temp_df.membership))*100)
-	df = pd.DataFrame(np.array([results,np.unique(membership)]).transpose(),columns=['accuracy','network'])
-	df.accuracy = df.accuracy.astype(float)
-	sns.barplot(data=df,x='network',y='accuracy')
-	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_predict_network.pdf')
+def plot_what_genes():
+	sns.set_style('whitegrid')
+	sns.set(font='Helvetica')
+	ctype='fc'
+	distance = True
+	topological = False
+
+	matrix = functional_connectivity(topological,distance,None)
+	matrix = np.tril(matrix,-1)
+	matrix = matrix + matrix.transpose()
+	pc = np.load('/home/despoB/mb3152/gene_expression/results/pc.npy')
+	degree = np.load('/home/despoB/mb3152/gene_expression/results/degree.npy')
+	wcd = np.load('/home/despoB/mb3152/gene_expression/results/wcd.npy')
+
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	membership = np.zeros((400)).astype(str)
+	yeo_df = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+
+	df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength'])
+	for node,name,pval,w,d in zip(range(400),membership,pc,wcd,degree):
+		try:
+			for gene in np.load('/home/despoB/mb3152/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,node))[-1]:
+				df= df.append(pd.DataFrame(np.array([[gene],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
+		except:
+			df= df.append(pd.DataFrame(np.array([[np.nan],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
+	df.gene = df.gene.astype(float)
+	df['participation coefficient'] = df['participation coefficient'].astype(float)
+	df['strength'] = df['strength'].astype(float)
+	df['within community strength'] = df['within community strength'].astype(float)
+
+	"""
+	predict the nodal values of a node based on which genes maximize its fit to FC
+	"""
+
+	unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
+	features = np.zeros((400,len(unique))).astype(bool)
+	for node in range(400):
+		g_array = unique
+		g_b_array = unique.copy().astype(bool)
+		g_b_array[:] = False
+		for g in df.gene[df.node==node].values:
+			g_b_array[g_array==g] = True
+		features[node,:] = g_b_array
+	features = features.astype(int)
+	mask = np.sum(features,axis=1) == 100
+	size = len(mask[mask==True])
+	features = features[mask,:]
+
+	reduce_dict = {'VisCent':'Visual','VisPeri':'Visual','SomMotA':'Motor','SomMotB':'Motor','DorsAttnA':'Dorsal Attention','DorsAttnB':'Dorsal Attention','SalVentAttnA':'Ventral Attention','SalVentAttnB':'Ventral Attention','Limbic':'Limbic','ContA':'Control','ContB':'Control','ContC':'Control','DefaultA':'Default','DefaultB':'Default','DefaultC':'Default','TempPar':'Default'}
+	membership = np.zeros((400)).astype(str)
+	yeo_df = pd.read_csv('/home/despoB/mb3152/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	for i,n in enumerate(yeo_df):
+		membership[i] = reduce_dict[n.split('_')[2]]
+	
+	membership = membership[mask]
+	pc = pc[mask]
+	degree = degree[mask]
+	wcd = wcd[mask]
+
+	result_df = pd.DataFrame(columns=['prediction_acc','prediction_type','layers','nodes'])
+	for real,measure in zip([pc,wcd,degree,membership],['pc','wcd','degree','network']):
+		for prediction in glob.glob('/home/despoB/mb3152/gene_expression/results/*nn*%s*'%(measure)):
+			players = prediction.split('/')[-1].split('.')[0].split('_')[1]
+			nodes = prediction.split('/')[-1].split('.')[0].split('_')[2]
+			try: nodes = int(nodes)
+			except:
+				nidx = 0
+				while True:
+					try:
+						nidx = nidx + 1
+						int(nodes[:nidx])
+						continue
+					except:break
+				nodes = int(nodes[:nidx-1])
+
+			prediction = np.load(prediction)
+			if measure == 'network':
+				r = len(real[real==prediction]) / float(len(real))
+			else:
+				r = pearsonr(prediction,real)[0]
+			result_df = result_df.append(pd.DataFrame(np.array([[r],[measure],[players],[nodes]]).transpose(),columns=['prediction_acc','prediction_type','layers','nodes']))
+	
+	result_df.prediction_acc = result_df.prediction_acc.astype(float)
+	df.nodes = df.nodes.astype(int)
+	df.layers = df.layers.astype(int)
+	for tp in np.unique(result_df.prediction_type.values):
+		print tp,result_df[result_df.prediction_type==tp].layers.values[np.argmax(result_df.prediction_acc.values[result_df.prediction_type==tp])],result_df[result_df.prediction_type==tp].prediction_acc.values[np.argmax(result_df.prediction_acc.values[result_df.prediction_type==tp])]
+
+	sns.set_style('white')
+	sns.set(font='Helvetica')
+	fig, subplots = sns.plt.subplots(2,2,figsize=(7.16535,7.16535))
+	for idx,tp in enumerate(np.unique(result_df.prediction_type.values)):
+		tdf = result_df[result_df.prediction_type==tp]
+		tdf.prediction_acc[tdf.prediction_acc<0.0] = 0.0
+		tdf.nodes = tdf.nodes.astype(int)
+		tdf.layers = tdf.layers.astype(int)
+		print tp,tdf.layers.values[np.argmax(tdf.prediction_acc.values)],tdf.nodes.values[np.argmax(tdf.prediction_acc.values)],np.max(tdf.prediction_acc.values)
+		f = sns.stripplot(tdf.nodes.values,tdf.layers.values,hue=tdf.prediction_acc.values,palette="coolwarm",size=16,ax=subplots.flatten()[idx])
+		f.set_ylabel('layers')
+		f.set_xlabel('nodes')
+		f.set_title(tp)
+		f.legend_.remove()
+	sns.plt.tight_layout()
+	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_prediction_sweet.pdf')
+	# sns.plt.show()
+	sns.plt.close()
+
+
+	sns.set(font='Helvetica')
+	for measure,tp in zip([pc,wcd,degree],['pc','wcd','degree']):
+		tdf = result_df[result_df.prediction_type==tp]
+		tdf.nodes = tdf.nodes.astype(int)
+		tdf.layers = tdf.layers.astype(int)
+		idx = np.argmax(tdf.prediction_acc.values)
+		nodes = tdf.nodes.values[idx]
+		layers = tdf.layers.values[idx]
+		prediction = np.load('/home/despoB/mb3152/gene_expression/results/nn_%s_%s%s.npy'%(layers,nodes,tp))
+		g = sns.jointplot(measure,prediction, kind="reg")
+		sns.plt.ylabel('gene prediction')
+		sns.plt.xlabel('%s' %(tp))
+		sns.plt.tight_layout()
+		sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_prediction_%s.pdf'%(tp))
+		# sns.plt.show()
+		sns.plt.close()
+	
+	sns.set(font='Helvetica')
+	tp = 'network'
+	measure = membership
+	tdf = result_df[result_df.prediction_type==tp]
+	tdf.nodes = tdf.nodes.astype(int)
+	tdf.layers = tdf.layers.astype(int)
+	idx = np.argmax(tdf.prediction_acc.values)
+	nodes = tdf.nodes.values[idx]
+	layers = tdf.layers.values[idx]
+	prediction = np.load('/home/despoB/mb3152/gene_expression/results/nn_%s_%s%s.npy'%(layers,nodes,tp))
+	bar_df = pd.DataFrame(columns=['system','recall'])
+	for system in np.unique(measure):
+		recall = len(membership[(membership==system) & (prediction == system)]) / float(len(membership[membership==system]))
+		bar_df = bar_df.append(pd.DataFrame(np.array([[system],[recall]]).transpose(),columns=['system','recall']))
+	bar_df.recall = bar_df.recall.astype(float)
+	sns.barplot(y='recall',x='system',data=bar_df,orient='v')
+	sns.plt.tight_layout()
+	sns.plt.savefig('/home/despoB/mb3152/gene_expression/figures/nn_prediction_network.pdf')
+	sns.plt.close()
+
 
 def single(ctype,topological=False,distance=True):
 	df = pd.DataFrame(columns=['network','gene_co - fc'])
@@ -785,6 +974,13 @@ def sge(whatrun):
 		for node in range(400):
 			os.system('qsub -pe threaded 10 -binding linear:10  -V -l mem_free=2.2G -j y -o /home/despoB/mb3152/gene_expression/sge/ -e /home/despoB/mb3152/gene_expression/sge/ -N n%s gene_expression_analysis.py %s %s' %(node,'nodal',node))
 
+	if whatrun == 'layers':
+		for nodes in [5,10,15,20,25,50,100,200,300]:
+			for layers in range(1,16):
+				if nodes * layers <= 1500:
+					continue
+				os.system('qsub -pe threaded 20 -binding linear:20  -V -l mem_free=20G -j y -o /home/despoB/mb3152/gene_expression/sge/ -e /home/despoB/mb3152/gene_expression/sge/ -N l%s_n%s gene_expression_analysis.py what_genes %s %s'%(layers,nodes,layers,nodes))
+
 def run_all(matrix,topological,distance,network):
 	fit_matrix(matrix,topological,distance,network)
 	SA_find_genes(matrix,topological,distance,network,n_trys=50)
@@ -792,6 +988,47 @@ def run_all(matrix,topological,distance,network):
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'make_fc': subject_functional_connectivity(sys.argv[2])
 	if sys.argv[1] == 'nodal': SA_find_genes(matrix='fc',network=int(sys.argv[2]),cores=10)
+	if sys.argv[1] == 'what_genes':
+		# while True:
+		# 	layers = np.zeros((int(sys.argv[2]))).astype(int)
+		# 	for l in range(len(layers)):
+		# 		layers[l] = np.random.randint(3,500./len(layers),1)
+		# 	# print np.sum(layers)
+		# 	if np.sum(layers) > 500:
+		# 		continue
+		# 	layers = tuple(layers)
+		# 	layers_name = '_'
+		# 	for l in layers:
+		# 		layers_name = layers_name + '%s_' %(l)
+		# 	break
+		# while True:
+			# layers = np.zeros((10)).astype(int)
+			# for l in range(len(layers)):
+			# 	layers[l] = np.random.randint(1,60,1)
+			# if np.sum(layers) > 300:
+			# 	continue
+			# layers = tuple(layers)
+			# layers_name = '_'
+			# for l in layers:
+			# 	layers_name = layers_name + '%s_' %(l)
+			# break
+		# layers = (1000,500,300,200,100,50,40,30,20,10)
+		# layers = (10000,500,300,200,100,50,40,30,20,10)
+		# layers = (100,100,100,100,100,100,100,100,100,100)
+		# layers = (50,50,50,50,50,50,50,50,50,50)
+		# layers = (30,30,30,30,30,30,30,30,30,30)
+		n_layers = int(sys.argv[2])
+		n_nodes = int(sys.argv[3])
+		layers = []
+		for n in range(n_layers):
+			layers.append(int(n_nodes))
+		layers = tuple(layers)
+		# layers_name = '_'
+		# for l in layers:
+		# 	layers_name = layers_name + '%s_' %(l)
+		layers_name = '_%s_%s'%(n_layers,n_nodes)
+		what_genes(cores=multiprocessing.cpu_count()-2)
+
 
 
 # build gene network where edges are the similarity of expression across the brain; what role do gene play in this network that maximize fit to FC?
