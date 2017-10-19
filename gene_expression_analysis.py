@@ -1,4 +1,5 @@
 #!/home/mbmbertolero/anaconda2/bin/python
+
 import brain_graphs
 import numpy.linalg as npl
 import numpy as np
@@ -18,6 +19,7 @@ import scipy
 import statsmodels.api as sm
 
 from sklearn.neural_network import MLPRegressor, MLPClassifier
+from sklearn.linear_model import Ridge, RidgeClassifier
 
 import glob
 from itertools import combinations
@@ -27,6 +29,9 @@ import matplotlib.pylab as plt
 import matplotlib as mpl
 from matplotlib import patches
 plt.rcParams['pdf.fonttype'] = 42
+path = '/home/mbmbertolero/data/helvetica/Helvetica.ttf'
+mpl.font_manager.FontProperties(fname=path)
+mpl.rcParams['font.family'] = 'Helvetica'
 import math
 import statsmodels.api as sm
 
@@ -54,8 +59,43 @@ cerebellar = nib.load('//share/apps/fsl/5.0.9/data/atlases/Cerebellum/Cerebellum
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('-r',action='store',dest='run_type')
+parser.add_argument('-m',action='store',dest='matrix',default='sc')
+parser.add_argument('-layers',action='store',dest='n_layers',type=int,default=1)
+parser.add_argument('-name',action='store',dest='name',type=str,default='participation coefficient')
+parser.add_argument('-nodes',action='store',dest='n_nodes',type=int,default=5)
+parser.add_argument('-n',action='store',dest='network')
+parser.add_argument('-task',action='store',dest='task')
+parser.add_argument('-s',action='store',dest='subject')
+parser.add_argument('-topological',action='store',dest='topological',type=bool,default=False)
+parser.add_argument('-distance',action='store',dest='distance',type=bool,default=True)
+parser.add_argument('-prediction',action='store',dest='prediction',type=str,default='genetic')
 r = parser.parse_args()
 locals().update(r.__dict__)
+try:network = int(network)
+except:pass
+global ignore_nodes
+
+layers_name = '%s_%s' %(n_layers,n_nodes)
+layers = []
+for layer in range(n_layers):
+	layers.append(n_nodes)
+global tasks
+tasks = ['WM','RELATIONAL','LANGUAGE','SOCIAL','EMOTION']
+
+
+"""
+Globals for neural network behavior prediction
+"""
+global subject_pcs
+global subject_wmds
+global subject_mods
+global rest_subject_pcs 
+global rest_subject_wmds 
+global rest_subject_mods
+global task_perf
+global task_matrices
+global rest_matrices
+global use_matrix
 
 def swap(matrix,membership):
 	membership = np.array(membership)
@@ -241,6 +281,7 @@ def functional_connectivity(topological=False,distance=True,network=None):
 		matrix = []
 		matrix_files = glob.glob('/home/mbmbertolero/data/gene_expression/fc_matrices/yeo/*REST*')
 		for m in matrix_files:
+			if random in m: continue
 			m = np.loadtxt(m)
 			matrix.append(m.copy())
 		matrix = np.nanmean(matrix,axis=0)
@@ -276,7 +317,7 @@ def structural_connectivity(topological=False,distance=True,network=None):
 			m = np.load(m)
 			matrix.append(m.copy())
 		matrix = np.nanmean(matrix,axis=0)
-		np.save('/home/mbmbertolero/data/gene_expression/data/matrices/sc_matrix.npy',matrix)
+		np.save('/home/mbmbertolero/data/gene_expression/data/matrices/sc_matrix_new.npy',matrix)
 	matrix[np.isinf(matrix)] = np.nan
 	if topological == True:
 		temp_matrix = matrix.copy()
@@ -294,164 +335,58 @@ def structural_connectivity(topological=False,distance=True,network=None):
 		else: matrix[np.arange(matrix.shape[0])!=network,:] = np.nan
 	return matrix
 
-def single(ctype,topological=False,distance=True):
-	df = pd.DataFrame(columns=['network','gene_co - fc'])
-	for network in ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']:
-		try:
-			a_matrix = functional_connectivity(topological,distance,network)
-			gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,network))[-1]
-			gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-			mask = np.sum([gene_exp_matrix,a_matrix],axis=0)
-			mask[np.isnan(mask)==True] = False
-			mask[mask!=False] = True
-			mask = mask.astype(bool)
-			for i,j in zip(a_matrix[mask].flatten(),gene_exp_matrix[mask].flatten()):
-				df= df.append(pd.DataFrame(np.array([[j-i],[network]]).transpose(),columns=['gene_co - fc','network']))
-			# print network,scipy.stats.ttest_ind(a_matrix[mask].flatten(),gene_exp_matrix[mask].flatten())
-			print network, pearsonr(a_matrix[mask].flatten(),gene_exp_matrix[mask].flatten())
-		except: continue
+def avg_graph_metrics(matrix):
+	if matrix == 'fc': m = functional_connectivity(topological,distance,None)
+	if matrix == 'sc': m = structural_connectivity(topological,distance,None)
+	m = m + m.transpose()
+	m = np.tril(m,-1)
+	m = m + m.transpose()
+	pc = []
+	wcd = []
+	degree = []
+	between = []
+	for cost in np.linspace(0.01,0.10):
+		g = brain_graphs.matrix_to_igraph(m.copy(),cost=cost,mst=True)
+		# g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+		g = VertexClustering(g,membership=membership_ints)
+		g = brain_graphs.brain_graph(g)
+		pc.append(g.pc)
+		wcd.append(g.wmd)
+		degree.append(g.community.graph.strength(weights='weight'))
+		between.append(g.community.graph.betweenness())
+	pc = np.nanmean(pc,axis=0)
+	wcd = np.nanmean(wcd,axis=0)
+	degree = np.nanmean(degree,axis=0)
+	between = np.nanmean(between,axis=0)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix),pc)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix),degree)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix),wcd)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix),between)
 
-def barplot(fitwhat,topological,distance):
-	sns.set_style('whitegrid')
-	sns.set(font='Helvetica')
-
-	if fitwhat=='brainmap':
-		a_matrix = brainmap_coact()
-		gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_None.npy'%(fitwhat,topological,distance))[-1]
-		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-		diff_matrix = np.abs(a_matrix-gene_exp_matrix)	
-	if fitwhat =='fc':
-		a_matrix = functional_connectivity(topological,distance,None)
-		gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_None.npy'%(fitwhat,topological,distance))[-1]
-		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-
-	np.fill_diagonal(a_matrix,np.nan)
-	
-	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	for i,n in enumerate(yeo_df):
-		membership[i] = reduce_dict[n.split('_')[2]]
-
-	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
-
-	r = a_matrix.copy()
-	# mean_fc = np.load('/home/mbmbertolero/data/gene_expression/data/matrices/mean_fc.npy')
-	# r[mean_fc<.5] = np.nan
-	mask = np.sum([a_matrix,gene_exp_matrix],axis=0)
-
-	print pearsonr(a_matrix[np.isnan(mask)==False].flatten(),gene_exp_matrix[np.isnan(mask)==False].flatten())
-	# 1/0
-	r[np.isnan(mask)==False] = abs(sm.GLM(a_matrix[np.isnan(mask)==False].flatten(),sm.add_constant(gene_exp_matrix[np.isnan(mask)==False].flatten())).fit().resid_response)
-	plot_df = pd.DataFrame(columns=['Error','Network'])
-	for i in range(8):
-		for e in np.nanmean(r,axis=0)[membership=='%s'%(i)]:
-			plot_df = plot_df.append(pd.DataFrame(data=[[e,names[i]]],columns=['Error','Network']))
-	plot_df['Error'] = plot_df['Error'].astype(float)
-	sns.barplot(data=plot_df,y='Error',x='Network')
-	sns.plt.xticks(rotation=90)
-	sns.plt.tight_layout()
-	# sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/error_%s_t_%s_d_%s.pdf'%(fitwhat,topological,distance))
-	sns.plt.show()
-	
-	tiny_r = np.zeros((8,8))
-	for i in range(8):
-		for j in range(8):
-			tiny_r[i,j] = np.nanmean(r[membership==str(i)][:,membership==str(j)])
-		# tiny_r[j,i] = np.nanmean(r[membership==str(i)][:,membership==str(j)])
-	# tiny_fc = np.zeros((7,7))
-	# for i in range(7):
-	# 	for j in range(7):
-	# 		tiny_fc[i,j] = np.nanmean(a_matrix[membership==str(i)][:,membership==str(j)])
-	# 	# tiny_r[j,i] = np.nanmean(r[membership==str(i)][:,membership==str(j)])
-	# tiny_g = np.zeros((7,7))
-	# for i in range(7):
-	# 	for j in range(7):
-	# 		tiny_g[i,j] = np.nanmean(gene_exp_matrix[membership==str(i)][:,membership==str(j)])
-	# 	# tiny_r[j,i] = np.nanmean(r[membership==str(i)][:,membership==str(j)])
-
-	# sns.plt.yticks(range(7),reversed(names),rotation=360)
-	# sns.plt.xticks(range(7),names,rotation=90)
-	# sns.plt.tight_layout()
-
-	sns.heatmap(tiny_r,square=True,rasterized=True)
-	sns.plt.yticks(range(7),reversed(names),rotation=360)
-	sns.plt.xticks(range(7),names,rotation=90)
-	sns.plt.tight_layout()
-	# sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/error_matrix_%s_t_%s_d_%s.pdf'%(fitwhat,topological,distance))
-	sns.plt.show()
-
-def plot(fitwhat,topological,distance):
-
-	sns.set_style('dark')
-	sns.set(font='Helvetica',rc={'axes.facecolor':'.5','axes.grid': False})
-
-	reduce_networks = False
-	global gene_exp
-	fig,subplots = sns.plt.subplots(1,2,figsize=(12,6))
-	subplots = subplots.reshape(-1)
-	if fitwhat=='brainmap':
-		a_matrix = brainmap_coact()
-		gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s.npy'%(fitwhat,topological,distance))[-1]
-		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-		diff_matrix = np.abs(a_matrix-gene_exp_matrix)
-
-	if fitwhat == 'sc':
-		sc = scipy.io.loadmat('/home/mbmbertolero/data/gene_expression/data/yeo_400.mat')['connectivity']
-		a_matrix= np.zeros((400,400))
-		for i,j in combinations(range(400),2):
-			r = pearsonr(sc[i,:],sc[j,:])[0]
-			a_matrix[i,j] = r
-			a_matrix[j,i] = r
-		gene_exp_matrix = np.load(glob.glob('/home/mbmbertolero/data/gene_expression/results/*sc*')[-1])
-		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-		diff_matrix = np.abs(a_matrix-gene_exp_matrix)
-
-	if fitwhat == 'fc':
-		a_matrix = functional_connectivity()
-		gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s.npy'%(fitwhat,topological,distance))[-1]
-		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-		diff_matrix = np.abs(a_matrix-gene_exp_matrix)
-
-	to_plot = [a_matrix,gene_exp_matrix]
-
-	names = ['%s matrix'%(fitwhat),'gene coexpression matrix']
-	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	for i,n in enumerate(yeo_df):
-		if reduce_networks == True: membership[i] = reduce_dict[n.split('_')[2]]
-		else:membership[i] = n.split('_')[2]
-	
-	for idx,matrix,name in zip(np.arange(len(to_plot)),to_plot,names):
-		sns.set(style='dark',context="paper",font='Helvetica',font_scale=1.2)
-		np.fill_diagonal(matrix,0.0)
-		swap_indices = swap(matrix,membership)
-		heatfig = sns.heatmap(matrix[swap_indices,:][:,swap_indices],yticklabels=[''],xticklabels=[''],square=True,rasterized=True,cbar=False,ax=subplots[idx])
-		# Use matplotlib directly to emphasize known networks
-		heatfig.set_title(name,fontdict={'fontsize':'large'})
-		if idx == 0: heatfig.annotate('r=%s'%(nan_pearsonr(np.tril(a_matrix,-1).flatten(),np.tril(gene_exp_matrix,-1).flatten())[0]), xy=(1,1),**{'fontsize':'small'})
-		for i,network in zip(np.arange(len(membership)),membership[swap_indices]):
-			if network != membership[swap_indices][i - 1]:
-				heatfig.figure.axes[idx].add_patch(patches.Rectangle((i+len(membership[membership==network]),len(membership)-i),len(membership[membership==network]),len(membership[membership==network]),facecolor="none",edgecolor='black',linewidth="1",angle=180))
-	
-	# idx = 2
-	# matrix = diff_matrix
-	# sns.set(style='dark',context="paper",font='Helvetica',font_scale=1.2)
-	# np.fill_diagonal(matrix,0.0)
-	# swap_indices = swap(matrix,membership)
-	# heatfig = sns.heatmap(matrix[swap_indices,:][:,swap_indices],yticklabels=[''],xticklabels=[''],square=True,rasterized=True,cbar=False,ax=subplots[idx])
-	# # Use matplotlib directly to emphasize known networks
-	# heatfig.set_title('difference',fontdict={'fontsize':'large'})
-	# # heatfig.annotate('r=%s'%(nan_pearsonr(np.tril(a_matrix,-1).flatten(),np.tril(gene_exp_matrix,-1).flatten())[0]), xy=(1,1),**{'fontsize':'small'})
-	# for i,network in zip(np.arange(len(membership)),membership[swap_indices]):
-	# 	if network != membership[swap_indices][i - 1]:
-	# 		heatfig.figure.axes[idx].add_patch(patches.Rectangle((i+len(membership[membership==network]),len(membership)-i),len(membership[membership==network]),len(membership[membership==network]),facecolor="none",edgecolor='black',linewidth="1",angle=180))	
-
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/%s.pdf'%(fitwhat))
-	sns.plt.show()
+def plot_distance():
+	"""
+	look at the relationship between edge strength and distance
+	"""
+	f = functional_connectivity(distance=False)
+	d = atlas_distance()
+	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),order=3,scatter_kws={'alpha':.015})
+	sns.plt.ylabel('distance')
+	sns.plt.xlabel('connectivty')
+	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance_3.pdf')
+	sns.plt.close()
+	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),order=2,scatter_kws={'alpha':.015})
+	sns.plt.ylabel('distance')
+	sns.plt.xlabel('connectivty')
+	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance_2.pdf')
+	sns.plt.close()
+	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),scatter_kws={'alpha':.015})
+	sns.plt.ylabel('distance')
+	sns.plt.xlabel('connectivty')
+	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance.pdf')
+	sns.plt.close()
 
 def fit_matrix_multi(ignore_idx):
+	print ignore_idx
 	sys.stdout.flush()
 	global co_a_matrix
 	global gene_exp
@@ -462,12 +397,7 @@ def fit_matrix_multi(ignore_idx):
 def fit_matrix(matrix,topological=True,distance=True,network=None):
 	try: result = np.load('/home/mbmbertolero/data/gene_expression/results/fit_all_%s_%s_%s_%s.npy'%(matrix,topological,distance,network))
 	except:
-		global co_a_matrix
 		global gene_exp
-		if matrix == 'fc': co_a_matrix = functional_connectivity(topological,distance,network)
-		if matrix == 'sc': co_a_matrix = structural_connectivity(topological,distance,network)
-		np.fill_diagonal(co_a_matrix,0.0)
-		co_a_matrix[np.isinf(co_a_matrix)] = np.nan
 		cores= multiprocessing.cpu_count()-1
 		pool = Pool(cores)
 		result = pool.map(fit_matrix_multi,range(gene_exp.shape[1]))
@@ -482,7 +412,7 @@ def fit_SA(indices_for_correlation):
 	np.fill_diagonal(temp_m,np.nan)
 	return nan_pearsonr(co_a_matrix.flatten(),temp_m.flatten())[0]
 
-def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=100,start_temp=.5,end_temp=.01,temp_step=.001,n_trys=100,cores=10):
+def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=100,start_temp=.5,end_temp=.01,temp_step=.001,n_trys=100,cores=15):
 	#set number of cores depending on which node we are on
 	# cores= multiprocessing.cpu_count()-2
 	
@@ -550,439 +480,609 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 		if temp < end_temp: break
 	np.save('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(matrix,topological,distance,network),np.array(save_results))
 
-def nn_regress(node):
-	global features
-	global measure
-	global layers
-	global size
-	print node
-	sys.stdout.flush()
-	model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=layers,alpha=1e-5,random_state=0)
-	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
-	return model.predict(features[node].reshape(1, -1))
+def plot_pc_by_fit(matrix,topological=False,distance=True):
 
-def nn_cater(node):
-	global features
-	global measure
-	global layers
-	global size
-	print node
-	sys.stdout.flush()
-	model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=layers,alpha=1e-5,random_state=0)
-	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
-	return model.predict(features[node].reshape(1, -1))
+	sns.set(context="paper",font='Helvetica',style='white')
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
+	membership = np.zeros((400)).astype(str)
+	membership_ints = np.zeros((400)).astype(int)
+	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
 
-def what_genes(cores):
-	global features
-	global measure
-	global layers
-	global layers_name
-	global size
-	sns.set_style('whitegrid')
-	sns.set(font='Helvetica')
-	ctype='fc'
-	distance = True
-	topological = False
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+		membership_ints[i] = int(full_dict[n.split('_')[2]])
+
+	if matrix == 'fc': m = functional_connectivity(topological,distance,None)
+	if matrix == 'sc': m = structural_connectivity(topological,distance,None)
+	m = m + m.transpose()
+	m = np.tril(m,-1)
+	m = m + m.transpose()
 
 	try:
-		pc = np.load('/home/mbmbertolero/data/gene_expression/results/pc.npy')
-		degree = np.load('/home/mbmbertolero/data/gene_expression/results/degree.npy')
-		wcd = np.load('/home/mbmbertolero/data/gene_expression/results/wcd.npy')
+		pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
+		strength = np.load('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix))
+		wcs = np.load('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix))
+		between = np.load('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix))
 	except:
-		matrix = functional_connectivity(topological,distance,None)
-		matrix = np.tril(matrix,-1)
-		matrix = matrix + matrix.transpose()
 		pc = []
-		wcd = []
-		degree = []
-		for cost in np.arange(150,201)*0.001:
-			g = brain_graphs.matrix_to_igraph(matrix.copy(),cost=cost,mst=True)
-			g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+		wcs = []
+		strength = []
+		between = []
+		for cost in np.linspace(0.01,0.10):
+			g = brain_graphs.matrix_to_igraph(m.copy(),cost=cost,mst=True)
+			# g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+			g = VertexClustering(g,membership=membership_ints)
+			g = brain_graphs.brain_graph(g)
 			pc.append(g.pc)
-			wcd.append(g.wmd)
-			degree.append(g.community.graph.strength(weights='weight'))
+			wcs.append(g.wmd)
+			strength.append(g.community.graph.strength(weights='weight'))
+			between.append(g.community.graph.betweenness())
 		pc = np.nanmean(pc,axis=0)
 		wcd = np.nanmean(wcd,axis=0)
-		degree = np.nanmean(degree,axis=0)
-		np.save('/home/mbmbertolero/data/gene_expression/results/pc.npy',pc)
-		np.save('/home/mbmbertolero/data/gene_expression/results/degree.npy',degree)
-		np.save('/home/mbmbertolero/data/gene_expression/results/wcd.npy',wcd)
+		strength = np.nanmean(strength,axis=0)
+		between = np.nanmean(between,axis=0)
+		np.save('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix),pc)
+		np.save('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix),strength)
+		np.save('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix),wcd)
+		np.save('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix),between)
 
-	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	yeo_colors = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
-	for i,n in enumerate(yeo_df):
-		membership[i] = n.split('_')[2]
-
-	df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength'])
-	for node,name,pval,w,d in zip(range(400),membership,pc,wcd,degree):
-		try:
-			for gene in np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,node))[-1]:
-				df= df.append(pd.DataFrame(np.array([[gene],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
-		except:
-			df= df.append(pd.DataFrame(np.array([[np.nan],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
-	df.gene = df.gene.astype(float)
-	df['participation coefficient'] = df['participation coefficient'].astype(float)
-	df['strength'] = df['strength'].astype(float)
-	df['within community strength'] = df['within community strength'].astype(float)
-
-	unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
-	features = np.zeros((400,len(unique))).astype(bool)
-	for node in range(400):
-		g_array = unique
-		g_b_array = unique.copy().astype(bool)
-		g_b_array[:] = False
-		for g in df.gene[df.node==node].values:
-			g_b_array[g_array==g] = True
-		features[node,:] = g_b_array
-	features = features.astype(int)
-	mask = np.sum(features,axis=1) == 100
-	size = len(mask[mask==True])
-	features = features[mask,:]
-
-	reduce_dict = {'VisCent':'Visual','VisPeri':'Visual','SomMotA':'Motor','SomMotB':'Motor','DorsAttnA':'Dorsal Attention','DorsAttnB':'Dorsal Attention','SalVentAttnA':'Ventral Attention','SalVentAttnB':'Ventral Attention','Limbic':'Limbic','ContA':'Control','ContB':'Control','ContC':'Control','DefaultA':'Default','DefaultB':'Default','DefaultC':'Default','TempPar':'Default'}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	for i,n in enumerate(yeo_df):
-		membership[i] = reduce_dict[n.split('_')[2]]
-
-	"""
-	testing 1,2 1,2
-	"""
-	# for measure,name in zip([pc,wcd,degree,membership],['pc','wcd','degree','network']):
-	# 	print name
-	# 	measure = measure[mask]
-	# 	results = []
-	# 	for i in range(3):
-	# 		m = np.zeros((len(measure))).astype(bool)
-	# 		m[np.random.choice(range(len(measure)),300,False)] = True
-	# 		if name == 'network': model = MLPClassifier(solver='lbfgs',hidden_layer_sizes=(10,),alpha=1e-5,random_state=0)
-	# 		else:model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=(10,10,10,10,10,10,10,10,10,10,10,10,10,10),alpha=1e-5,random_state=0)
-	# 		model.fit(features[m],measure[m])
-	# 		if name =='network':
-	# 			prediction = model.predict(features[m==False])
-	# 			results.append(len(prediction[prediction==measure[m==False]]) / float(len(prediction)))
-	# 		else:results.append(pearsonr(model.predict(features[m==False]),measure[m==False])[0])
-	# 	print np.mean(results)
-	# np.save('/home/mbmbertolero/data/gene_expression/results/nn%s%s.npy'%(layers_name,name),results)
-
-	"""
-	predict the nodal values of a node based on which genes maximize its fit to FC
-	"""
-	for measure,name in zip([pc,wcd,degree],['pc','wcd','degree']):
-	# for measure,name in zip([pc],['pc']):
-		measure = measure[mask]
-		pool = Pool(cores)
-		prediction = np.array(pool.map(nn_regress,range(size)))
-		np.save('/home/mbmbertolero/data/gene_expression/results/nn%s_%s.npy'%(layers_name,name),prediction[:,0])
-
-	"""
-	predict the network memebership of the node based on which genes maximize its fit to FC
-	"""
-	membership = membership[mask]
-	measure = membership
-	pool = Pool(cores)
-	prediction = np.array(pool.map(nn_cater,range(size)))
-	np.save('/home/mbmbertolero/data/gene_expression/results/nn%s_network.npy'%(layers_name),prediction[:,0])
-
-def plot_what_genes():
-	sns.set_style('whitegrid')
-	sns.set(font='Helvetica')
-	ctype='fc'
-	distance = True
-	topological = False
-
-	matrix = functional_connectivity(topological,distance,None)
-	matrix = np.tril(matrix,-1)
-	matrix = matrix + matrix.transpose()
-	pc = np.load('/home/mbmbertolero/data/gene_expression/results/pc.npy')
-	degree = np.load('/home/mbmbertolero/data/gene_expression/results/degree.npy')
-	wcd = np.load('/home/mbmbertolero/data/gene_expression/results/wcd.npy')
-
-	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	yeo_colors = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
-	for i,n in enumerate(yeo_df):
-		membership[i] = n.split('_')[2]
-
-	df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength'])
-	for node,name,pval,w,d in zip(range(400),membership,pc,wcd,degree):
-		try:
-			for gene in np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,node))[-1]:
-				df= df.append(pd.DataFrame(np.array([[gene],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
-		except:
-			df= df.append(pd.DataFrame(np.array([[np.nan],[node],[pval],[w],[d]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength']))
-	df.gene = df.gene.astype(float)
-	df['participation coefficient'] = df['participation coefficient'].astype(float)
-	df['strength'] = df['strength'].astype(float)
-	df['within community strength'] = df['within community strength'].astype(float)
-
-	"""
-	predict the nodal values of a node based on which genes maximize its fit to FC
-	"""
-
-	unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
-	features = np.zeros((400,len(unique))).astype(bool)
-	for node in range(400):
-		g_array = unique
-		g_b_array = unique.copy().astype(bool)
-		g_b_array[:] = False
-		for g in df.gene[df.node==node].values:
-			g_b_array[g_array==g] = True
-		features[node,:] = g_b_array
-	features = features.astype(int)
-	mask = np.sum(features,axis=1) == 100
-	size = len(mask[mask==True])
-	features = features[mask,:]
-
-	reduce_dict = {'VisCent':'Visual','VisPeri':'Visual','SomMotA':'Motor','SomMotB':'Motor','DorsAttnA':'Dorsal Attention','DorsAttnB':'Dorsal Attention','SalVentAttnA':'Ventral Attention','SalVentAttnB':'Ventral Attention','Limbic':'Limbic','ContA':'Control','ContB':'Control','ContC':'Control','DefaultA':'Default','DefaultB':'Default','DefaultC':'Default','TempPar':'Default'}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	for i,n in enumerate(yeo_df):
-		membership[i] = reduce_dict[n.split('_')[2]]
-	
-	membership = membership[mask]
-	pc = pc[mask]
-	degree = degree[mask]
-	wcd = wcd[mask]
-
-	result_df = pd.DataFrame(columns=['prediction_acc','prediction_type','layers','nodes'])
-	for real,measure in zip([pc,wcd,degree,membership],['pc','wcd','degree','network']):
-		for prediction in glob.glob('/home/mbmbertolero/data/gene_expression/results/*nn*%s*'%(measure)):
-			players = prediction.split('/')[-1].split('.')[0].split('_')[1]
-			nodes = prediction.split('/')[-1].split('.')[0].split('_')[2]
-			try: nodes = int(nodes)
-			except:
-				nidx = 0
-				while True:
-					try:
-						nidx = nidx + 1
-						int(nodes[:nidx])
-						continue
-					except:break
-				nodes = int(nodes[:nidx-1])
-
-			prediction = np.load(prediction)
-			if measure == 'network':
-				r = len(real[real==prediction]) / float(len(real))
-			else:
-				r = pearsonr(prediction,real)[0]
-			result_df = result_df.append(pd.DataFrame(np.array([[r],[measure],[players],[nodes]]).transpose(),columns=['prediction_acc','prediction_type','layers','nodes']))
-	
-	result_df.prediction_acc = result_df.prediction_acc.astype(float)
-	df.nodes = df.nodes.astype(int)
-	df.layers = df.layers.astype(int)
-	for tp in np.unique(result_df.prediction_type.values):
-		print tp,result_df[result_df.prediction_type==tp].layers.values[np.argmax(result_df.prediction_acc.values[result_df.prediction_type==tp])],result_df[result_df.prediction_type==tp].prediction_acc.values[np.argmax(result_df.prediction_acc.values[result_df.prediction_type==tp])]
-
-	sns.set_style('white')
-	sns.set(font='Helvetica')
-	fig, subplots = sns.plt.subplots(2,2,figsize=(7.16535,7.16535))
-	for idx,tp in enumerate(np.unique(result_df.prediction_type.values)):
-		tdf = result_df[result_df.prediction_type==tp]
-		tdf.prediction_acc[tdf.prediction_acc<0.0] = 0.0
-		tdf.nodes = tdf.nodes.astype(int)
-		tdf.layers = tdf.layers.astype(int)
-		print tp,tdf.layers.values[np.argmax(tdf.prediction_acc.values)],tdf.nodes.values[np.argmax(tdf.prediction_acc.values)],np.max(tdf.prediction_acc.values)
-		f = sns.stripplot(tdf.nodes.values,tdf.layers.values,hue=tdf.prediction_acc.values,palette="coolwarm",size=16,ax=subplots.flatten()[idx])
-		f.set_ylabel('layers')
-		f.set_xlabel('nodes')
-		f.set_title(tp)
-		f.legend_.remove()
-	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/nn_prediction_sweet.pdf')
-	# sns.plt.show()
-	sns.plt.close()
-
-
-	sns.set(font='Helvetica')
-	for measure,tp in zip([pc,wcd,degree],['pc','wcd','degree']):
-		tdf = result_df[result_df.prediction_type==tp]
-		tdf.nodes = tdf.nodes.astype(int)
-		tdf.layers = tdf.layers.astype(int)
-		idx = np.argmax(tdf.prediction_acc.values)
-		nodes = tdf.nodes.values[idx]
-		layers = tdf.layers.values[idx]
-		prediction = np.load('/home/mbmbertolero/data/gene_expression/results/nn_%s_%s%s.npy'%(layers,nodes,tp))
-		g = sns.jointplot(measure,prediction, kind="reg")
-		sns.plt.ylabel('gene prediction')
-		sns.plt.xlabel('%s' %(tp))
-		sns.plt.tight_layout()
-		sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/nn_prediction_%s.pdf'%(tp))
-		# sns.plt.show()
-		sns.plt.close()
-	
-	sns.set(font='Helvetica')
-	tp = 'network'
-	measure = membership
-	tdf = result_df[result_df.prediction_type==tp]
-	tdf.nodes = tdf.nodes.astype(int)
-	tdf.layers = tdf.layers.astype(int)
-	idx = np.argmax(tdf.prediction_acc.values)
-	nodes = tdf.nodes.values[idx]
-	layers = tdf.layers.values[idx]
-	prediction = np.load('/home/mbmbertolero/data/gene_expression/results/nn_%s_%s%s.npy'%(layers,nodes,tp))
-	bar_df = pd.DataFrame(columns=['system','recall'])
-	for system in np.unique(measure):
-		recall = len(membership[(membership==system) & (prediction == system)]) / float(len(membership[membership==system]))
-		bar_df = bar_df.append(pd.DataFrame(np.array([[system],[recall]]).transpose(),columns=['system','recall']))
-	bar_df.recall = bar_df.recall.astype(float)
-	sns.barplot(y='recall',x='system',data=bar_df,orient='v')
-	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/nn_prediction_network.pdf')
-	sns.plt.close()
-
-def sge(whatrun):
-	"""
-	SGE stuff
-	"""
-	# fit_brain_map()
-	# neurosynth()
-	# os.system('qsub -V -l mem_free=24G -j y -o /home/mbmbertolero/data/allen_gene_expression/sge/ -e /home/mbmbertolero/data/allen_gene_expression/sge/ -N co_act gene_expression_analysis.py')
-	# qsub -pe threaded 18 -binding linear:18  -V -l mem_free=5G -j y -o /home/mbmbertolero/data/gene_expression/sge/ -e /home/mbmbertolero/data/gene_expression/sge/ -N fitbrain gene_expression_analysis.py 
-
-	if whatrun == 'make_fc':
-		for subject in os.listdir('/home/despoB/connectome-data/'):
-			os.system('qsub -V -l mem_free=34G -j y -o /home/mbmbertolero/data/gene_expression/sge/ -e /home/mbmbertolero/data/gene_expression/sge/ -N vfc gene_expression_analysis.py make_fc %s'%(subject))
-
-	if whatrun == 'nodal':
-		for node in range(400):
-			os.system('qsub -pe threaded 10 -binding linear:10  -V -l mem_free=2.2G -j y -o /home/mbmbertolero/data/gene_expression/sge/ -e /home/mbmbertolero/data/gene_expression/sge/ -N n%s gene_expression_analysis.py %s %s' %(node,'nodal',node))
-
-	if whatrun == 'layers':
-		for nodes in [5,10,15,20,25,50,100,200,300]:
-			for layers in range(1,16):
-				if nodes * layers <= 1500:
-					continue
-				os.system('qsub -pe threaded 20 -binding linear:20  -V -l mem_free=20G -j y -o /home/mbmbertolero/data/gene_expression/sge/ -e /home/mbmbertolero/data/gene_expression/sge/ -N l%s_n%s gene_expression_analysis.py what_genes %s %s'%(layers,nodes,layers,nodes))
-
-def run_all(matrix,topological,distance,network):
-	fit_matrix(matrix,topological,distance,network)
-	SA_find_genes(matrix,topological,distance,network,n_trys=50)
-
-def plot_pc_by_fit(ctype,topological=False,distance=True):
-	sns.set_style('whitegrid')
-	sns.set(font='Helvetica')
-
-	matrix = functional_connectivity(topological,distance,None)
-	matrix = np.tril(matrix,-1)
-	matrix = matrix + matrix.transpose()
-	pc = []
-	for cost in [.15,.16,.17,.18,.19,.2]:
-		g = brain_graphs.matrix_to_igraph(matrix.copy(),cost=cost,mst=True)
-		g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
-		pc.append(g.pc)
-	pc = np.nanmean(pc,axis=0)
-
-	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
-	membership = np.zeros((400)).astype(str)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
-	yeo_colors = pd.read_csv('/home/mbmbertolero/data/Alex400_MNI/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
-	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
-
-
-
-	for i,n in enumerate(yeo_df):
-		membership[i] = n.split('_')[2]
-	df = pd.DataFrame(columns=['fit','network','participation coefficient'])
-	for node,name,pval in zip(range(400),membership,pc):
-		try:
-			a_matrix = functional_connectivity(topological,distance,node)
-			gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(ctype,topological,distance,node))[-1]
-			gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
-			mask = np.sum([gene_exp_matrix,a_matrix],axis=0)
-			mask[np.isnan(mask)==True] = False
-			mask[mask!=False] = True
-			mask = mask.astype(bool)
-			r = nan_pearsonr(gene_exp_matrix[mask].flatten(),a_matrix[mask].flatten())[0]
-			df= df.append(pd.DataFrame(np.array([[r],[name],[pval]]).transpose(),columns=['fit','network','participation coefficient']))
-		except:
-			df= df.append(pd.DataFrame(np.array([[np.nan],[name],[pval]]).transpose(),columns=['fit','network','participation coefficient']))
+	df = pd.DataFrame(columns=['fit','network','participation coefficient','within community strength','strength','betweenness'])
+	for node,name,pc_val,wcs_val,strength_val,b_val in zip(range(400),membership,pc,wcs,strength,between):
+		if node in ignore_nodes: continue
+		try:gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(matrix,topological,distance,node))[-1]
+		except:continue
+		gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
+		r = nan_pearsonr(m[node,:].flatten(),gene_exp_matrix[node,:].flatten())[0]
+		df= df.append(pd.DataFrame(np.array([[r],[name],[pc_val],[wcs_val],[strength_val],[b_val]]).transpose(),columns=['fit','network','participation coefficient','within community strength','strength','betweenness']))
 	df.fit = df.fit.astype(float)
 	df['participation coefficient'] = df['participation coefficient'].astype(float)
+	df['strength'] = df['strength'].astype(float)
+	df['within community strength'] = df['within community strength'].astype(float)
+	df['betweenness'] = df['betweenness'].astype(float)
+	df.to_csv('/home/mbmbertolero/data/gene_expression/results/%s_fits_df.csv'%(matrix))
 	order = np.unique(membership)[np.argsort(df.groupby('network')['fit'].apply(np.nanmean))]
 	
-	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,][np.isnan(df.fit.values)==False] /256.
-	
+	network_colors = []
+	for network in order:
+		network_colors.append(np.mean(colors[membership==network,:],axis=0))
+
 	def get_axis_limits(ax, scale=.9):
 		# return -(ax.get_xlim()[1]-ax.get_xlim()[0])*.1, ax.get_ylim()[1]*scale
 		return ax.get_xlim()[0], ax.get_ylim()[1] + (ax.get_ylim()[1]*.1)
 
 	fig,subplots = sns.plt.subplots(3,figsize=(7.204724,14))
-	yeo = sns.plt.imread('/home/mbmbertolero/data/gene_expression/yeo400.png')
-	sns.set_style("white")
+	yeo = sns.plt.imread('/home/mbmbertolero/gene_expression/yeo400.png')
 	s = subplots[0]
 	s.imshow(yeo,origin='upper')
 	s.set_xticklabels([])
 	s.set_yticklabels([])
-
+	sns.plt.draw()
 	sns.regplot(data=df,x='fit',y='participation coefficient',scatter_kws={'facecolors':colors},ax=subplots[1])
-
-	network_colors = []
-	for network in order:
-		network_colors.append(np.mean(colors[membership[np.isnan(df.fit)==False]==network,:],axis=0))
-	
+	r = str(pearsonr(df['participation coefficient'],df.fit)[0])[:6]
+	p = str(pearsonr(df['participation coefficient'],df.fit)[1])[:6]
 	sns.barplot(data=df,x='network',y='fit',palette=network_colors,order=order,ax=subplots[2])
-	subplots[2].set_ylim((np.min(df.fit),np.max(df.fit)))
-
+	subplots[2].set_ylim(.2,.7)
 	for label in subplots[2].get_xmajorticklabels():
 		label.set_rotation(90)
 	sns.despine()
 	s.spines['bottom'].set_visible(False)
 	s.spines['left'].set_visible(False)
 	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/figure1.pdf')
+	subplots[1].text(np.max(df.fit)*.9,np.max(df['participation coefficient'])*.9,'r = %s\np= %s'%(r,p))
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/network_fits_and_pccorr_%s.pdf'%(matrix))
 	sns.plt.show()
 
-def plot_distance():
+def compare_genetic_fits():
+
+	sns.set(context="paper",font='Helvetica',style='white')
+
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
+	membership = np.zeros((400)).astype(str)
+	membership_ints = np.zeros((400)).astype(int)
+	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
+
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+		membership_ints[i] = int(full_dict[n.split('_')[2]])
+	sc_fits = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/sc_fits_df.csv')
+	sc_fits['network'] = 'structural connectivity'
+	fc_fits = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/fc_fits_df.csv')
+	fc_fits['network'] = 'functional connectivity'
+	df = fc_fits.append(sc_fits)
+	#plot all the PC fits from sc and fc
+	sns.regplot(data=df,x='fit',y='participation coefficient',scatter_kws={'facecolors':colors})
+	r = str(np.around(pearsonr(df['participation coefficient'],df.fit)[0],4))
+	p = str(np.around(pearsonr(df['participation coefficient'],df.fit)[1],4))
+	if p == '0.0': p = '<1-e5'
+	sns.plt.text(np.max(df.fit)*.9,np.max(df['participation coefficient'])*.9,'r = %s\np= %s'%(r,p))
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/fc_and_sc_pc_fits.pdf')
+	sns.plt.show()
+
+	#plot all the fits
+	x,y = sc_fits['fit'], fc_fits['fit']
+	g = sns.regplot(data=df,x=x,y=y,scatter_kws={'facecolors':colors})
+	g.set_ylabel('fc fit')
+	g.set_xlabel('sc fit')
+	r = pearsonr(x,y)[0]
+	p = pearsonr(x,y)[1]
+	if r > 0: xy=(.1, .87)
+	else: xy=(.7, .87)
+	g.annotate("r={:.3f}\np={:.3f}".format(r,p),xy=xy, xycoords=g.transAxes)
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/fc_and_sc_fits.pdf')
+	sns.plt.show()
+
+	fig, subplots = sns.plt.subplots(2,2,figsize=(7.16535,7.16535))
+	subplots = subplots.flatten()
+	for idx,measure in enumerate(['participation coefficient', 'within community strength', 'strength', 'betweenness']):
+		# plot pc correlation between fc and sc
+		x,y = sc_fits[measure], fc_fits[measure]
+		# sns.regplot(x=x,y=y,ax=subplots[idx])
+		sns.regplot(x=x,y=y,ax=subplots[idx])
+
+		subplots[idx].set_ylabel('fc %s'%(measure))
+		subplots[idx].set_xlabel('sc %s'%(measure))
+		r = pearsonr(x,y)[0]
+		p = pearsonr(x,y)[1]
+		if r > 0: xy=(.1, .87)
+		else: xy=(.7, .87)
+		subplots[idx].annotate("r={:.3f}\np={:.3f}".format(r,p),xy=xy, xycoords=subplots[idx].transAxes)
+		# subplots[idx].text(np.min(x)+np.min(x)*.9,np.max(y)*.9,'r = %s\np= %s'%(r,p))
+	sns.plt.tight_layout()
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/fc_and_sc_metric_corr.pdf')
+	sns.plt.show()
+
+def regress(node):
+	global features
+	global measure
+	global size
+	sys.stdout.flush()
+	model = Ridge(alpha=1.0)
+	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
+	return model.predict(features[node].reshape(1, -1))
+
+def cater(node):
+	global features
+	global measure
+	global layers
+	global size
+	sys.stdout.flush()
+	model = RidgeClassifier(alpha=1.0)
+	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
+	return model.predict(features[node].reshape(1, -1))
+
+def role_prediction(matrix,prediction,distance=True,topological=False,cores=4):
+	global features
+	global measure
+	global layers
+	global layers_name
+	global size
+
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
+	membership = np.zeros((400)).astype(str)
+	membership_ints = np.zeros((400)).astype(int)
+	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
+
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+		membership_ints[i] = int(full_dict[n.split('_')[2]])
+
+	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
+	degree = np.load('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix))
+	wcd = np.load('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix))
+	between = np.load('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix))
+
+	if prediction == 'genetic':
+		df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network'])
+		for node,name,pval,w,d,b,m in zip(range(400),membership,pc,wcd,degree,between,membership):
+			if node in ignore_nodes: continue
+			for gene in np.load('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_%s_%s_%s.npy'%(matrix,topological,distance,node))[-1]:
+				df= df.append(pd.DataFrame(np.array([[gene],[node],[pval],[w],[d],[b],[m]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network']))
+		df.gene = df.gene.astype(float)
+		df['participation coefficient'] = df['participation coefficient'].astype(float)
+		df['strength'] = df['strength'].astype(float)
+		df['within community strength'] = df['within community strength'].astype(float)
+		df['betweenness'] = df['betweenness'].astype(float)
+		df.node = df.node.values.astype(int)
+		unique = np.unique(df.gene[np.isnan(df.gene.values)==False])
+		features = np.zeros((400,len(unique))).astype(bool)
+		for node in df.node.values:
+			g_array = unique
+			g_b_array = unique.copy().astype(bool)
+			g_b_array[:] = False
+			for g in df.gene[df.node==node].values:
+				g_b_array[g_array==g] = True
+			features[node,:] = g_b_array
+		features = features.astype(int)
+		mask = np.ones((400)).astype(bool)
+		mask[ignore_nodes] = False
+		membership = membership[mask]
+		features = features[mask]
+
+	if prediction == 'structural_connectivity':
+
+		df = pd.DataFrame(columns=['node','participation coefficient','within community strength','strength','betweenness','network'])
+		for node,name,pval,w,d,b,m in zip(range(400),membership,pc,wcd,degree,between,membership):
+			df= df.append(pd.DataFrame(np.array([[node],[pval],[w],[d],[b],[m]]).transpose(),columns=['node','participation coefficient','within community strength','strength','betweenness','network']))
+		df['participation coefficient'] = df['participation coefficient'].values.astype(float)
+		features = []
+		spc = np.load('/home/mbmbertolero/data/gene_expression/results/sc_pc.npy')
+		sdegree = np.load('/home/mbmbertolero/data/gene_expression/results/sc_strength.npy')
+		swcd = np.load('/home/mbmbertolero/data/gene_expression/results/sc_wcd.npy')
+		sbetween = np.load('/home/mbmbertolero/data/gene_expression/results/sc_between.npy')
+		# sedges = structural_connectivity(topological,distance,None)
+		# np.fill_diagonal(sedges,np.nan)
+		for node in range(400):
+			f = []
+			f.append(spc[node])
+			# f.append(sdegree[node])
+			# f.append(swcd[node])
+			# f.append(sbetween[node])
+			# for edge in list(sedges[node][np.isnan(sedges[node])==False]):
+				# f.append(edge)
+			features.append(np.array(f))
+		features = np.array(features)
+	
+	size = features.shape[0]
 	"""
-	look at the relationship between edge strength and distance
+	predict the nodal values of a node based on which genes maximize its fit to FC
 	"""
-	f = functional_connectivity(distance=False)
-	d = atlas_distance()
-	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),order=3,scatter_kws={'alpha':.015})
-	sns.plt.ylabel('distance')
-	sns.plt.xlabel('connectivty')
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance_3.pdf')
-	sns.plt.close()
-	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),order=2,scatter_kws={'alpha':.015})
-	sns.plt.ylabel('distance')
-	sns.plt.xlabel('connectivty')
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance_2.pdf')
-	sns.plt.close()
-	sns.regplot(f[np.isnan(f)==False].flatten(),d[np.isnan(f)==False].flatten(),scatter_kws={'alpha':.015})
-	sns.plt.ylabel('distance')
-	sns.plt.xlabel('connectivty')
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/results/fc_distance.pdf')
-	sns.plt.close()
+	for name in ['participation coefficient','strength','within community strength','betweenness']:
+		measure = np.array(df.groupby('node').mean()[name].values)
+		pool = Pool(16)
+		prediction_array = np.array(pool.map(regress,range(size)))[:,0]
+		del pool
+		print pearsonr(prediction_array,measure)
+		np.save('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s.npy'%(prediction,matrix,name.replace(' ','_')),prediction_array)
+	"""
+	predict the network memebership of the node based on which genes maximize its fit to FC
+	"""
+	measure = membership
+	pool = Pool(16)
+	prediction_array = np.array(pool.map(cater,range(size)))[:,0]
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_%s_network.npy'%(prediction,matrix),prediction_array)
+	print 'RESULT: ' + str(len(prediction_array[prediction==membership]))
 
-if len(sys.argv) > 1:
-	if run_type == 'make_fc': subject_functional_connectivity(sys.argv[2])
-	if run_type == 'nodal': SA_find_genes(matrix='fc',network=int(sys.argv[2]),cores=10)
-	if run_type == 'what_genes':
-		n_layers = int(sys.argv[2])
-		n_nodes = int(sys.argv[3])
-		layers = []
-		for n in range(n_layers):
-			layers.append(int(n_nodes))
-		layers = tuple(layers)
-		# layers_name = '_'
-		# for l in layers:
-		# 	layers_name = layers_name + '%s_' %(l)
-		layers_name = '_%s_%s'%(n_layers,n_nodes)
-		what_genes(cores=multiprocessing.cpu_count()-2)
+def plot_role_prediction(matrix = 'fc'):
+	sns.set(context="notebook",font='Helvetica',style='white')
+	
+	distance = True
+	topological = False
+	prediction = 'genetic'
+	reduce_membership = False
+
+	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
+	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
+	membership = np.zeros((400)).astype(str)
+	membership_ints = np.zeros((400)).astype(int)
+	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
+	yeo_colors = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
+	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
+
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
+	for i,n in enumerate(yeo_df):
+		membership[i] = n.split('_')[2]
+		membership_ints[i] = int(full_dict[n.split('_')[2]])
+
+	mask = np.ones((400)).astype(bool)
+	mask[ignore_nodes] = False
+
+	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))[mask]
+	pc_p = np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s.npy'%(prediction,matrix,'participation_coefficient'))
+	strength = np.load('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix))[mask]
+	strength_p = np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s.npy'%(prediction,matrix,'strength'))
+	wcd = np.load('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix))[mask]
+	wcd_p = np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s.npy'%(prediction,matrix,'within_community_strength'))
+	between = np.load('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix))[mask]
+	between_p = np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s.npy'%(prediction,matrix,'betweenness'))
+
+
+	df = pd.DataFrame(columns=['node','nodal metric','observed','prediction'])
+	for i in range(len(pc)):
+		df = df.append(pd.DataFrame(np.array([[i],['participation coefficient'],[pc[i]],[pc_p[i]]]).transpose(),columns=['node','nodal metric','observed','prediction']))
+		df = df.append(pd.DataFrame(np.array([[i],['strength'],[strength[i]],[strength_p[i]]]).transpose(),columns=['node','nodal metric','observed','prediction']))
+		df = df.append(pd.DataFrame(np.array([[i],['within community strength'],[wcd[i]],[wcd_p[i]]]).transpose(),columns=['node','nodal metric','observed','prediction']))
+		df = df.append(pd.DataFrame(np.array([[i],['betweenness'],[between[i]],[between_p[i]]]).transpose(),columns=['node','nodal metric','observed','prediction']))
+
+	df.observed = df.observed.values.astype(float)
+	df.prediction = df.prediction.values.astype(float)
+
+	g = sns.lmplot(x='observed',y='prediction',col='nodal metric',data=df,sharex=False,sharey=False,col_wrap=2,palette="muted",hue='nodal metric',size=(7.204724/2))
+	for i,m in enumerate(g.hue_names):
+		p = pearsonr(df['prediction'][df['nodal metric']==m].values,df['observed'][df['nodal metric']==m].values)
+		r,p = p[0],p[1]
+		if r > 0: xy=(.1, .87)
+		else: xy=(.7, .87)
+		g.axes[i].annotate("r={:.3f}\np={:.3f}".format(r,p),xy=xy, xycoords=g.axes[i].transAxes)
+	sns.plt.tight_layout()
+	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/figures/predict_%s_with_%s.pdf'%(matrix,prediction))
+	sns.plt.show()	
+
+def task_performance(subjects,task):
+	df = pd.read_csv('//home/mbmbertolero//S900_Release_Subjects_Demographics.csv')
+	performance = []
+	if task == 'EMOTION':
+		emotion_df = pd.DataFrame(np.array([df.Subject,df['Emotion_Task_Median_RT'],df['Emotion_Task_Acc']]).transpose(),columns=['Subject','RT','ACC']).dropna()
+		emotion_df['RT'] = emotion_df['RT'].values * -1
+		emotion_df['RT'] = scipy.stats.zscore(emotion_df['RT'].values)
+		emotion_df['ACC'] = emotion_df['ACC'].values * emotion_df['RT'].values
+		for subject in subjects:
+			temp_df = emotion_df[emotion_df.Subject==subject]
+			if len(temp_df) == 0:
+				performance.append(np.nan)
+				continue
+			performance.append(temp_df['ACC'].values[0])
+	if task == 'WM': 
+		wm_df = pd.DataFrame(np.array([df.Subject.values,df['WM_Task_Acc'].values,df['WM_Task_Median_RT'].values]).transpose(),columns=['Subject','ACC','RT']).dropna()
+		wm_df['RT'] = wm_df['RT'].values * -1
+		wm_df['RT'] = scipy.stats.zscore(wm_df['RT'].values)
+		for subject in subjects:
+			temp_df = wm_df[wm_df.Subject==subject]
+			if len(temp_df) == 0:
+				performance.append(np.nan)
+				continue
+			performance.append(temp_df['ACC'].values[0])
+	if task == 'RELATIONAL':
+		for subject in subjects:
+			performance.append(df['Relational_Task_Acc'][df.Subject == subject].values[0])
+	if task == 'LANGUAGE': 
+		for subject in subjects:
+			performance.append(np.nanmax([df['Language_Task_Story_Avg_Difficulty_Level'][df.Subject == subject].values[0],df['Language_Task_Math_Avg_Difficulty_Level'][df.Subject == subject].values[0]]))
+	if task == 'SOCIAL':
+		social_df = pd.DataFrame(np.array([df.Subject,df['Social_Task_TOM_Perc_TOM'],df['Social_Task_Random_Perc_Random']]).transpose(),columns=['Subject','ACC_TOM','ACC_RANDOM']).dropna()
+		for subject in subjects:
+			temp_df = social_df[social_df.Subject==subject]
+			if len(temp_df) == 0:
+				performance.append(np.nan)
+				continue
+			performance.append(np.nanmean([temp_df['ACC_RANDOM'].values[0],temp_df['ACC_TOM'].values[0]]))
+	return np.array(performance)
+
+def get_graphs(subjects,matrix):
+	mods = []
+	pcs = []
+	wmds = []
+	matrices = []
+	for subject in subjects:
+		subject_pcs,subject_wmds,subject_mods,m = graph_metrics(subject,matrix)
+		pcs.append(subject_pcs)
+		wmds.append(subject_wmds)
+		mods.append(subject_mods)
+		matrices.append(m)
+	mods = np.array(mods)
+	pcs = np.array(pcs)
+	wmds = np.array(wmds)
+	matrices = np.array(matrices)
+	results = {}
+	results['subject_pcs'] = pcs
+	results['subject_mods'] = mods
+	results['subject_wmds'] = wmds
+	results['matrices'] = matrices
+	return results
+
+def get_subjects(task,homedir='/home/mbmbertolero/hcp_performance/'):
+	from functools import reduce
+	subjects = []
+	task_subjects = np.loadtxt('/home/mbmbertolero/hcp/scripts/tfMRI/subject_lists/subject_runnum_list/all_new_subject_list_sort_post_motion.txt').astype(int).astype(str)
+	rest_subjects = np.loadtxt('/home/mbmbertolero/hcp/scripts/rfMRI/subject_lists/subject_runnum_list/all_new_subject_list_sort_post_motion.txt').astype(int).astype(str)
+	bedpost_subjects = []
+	for f in glob.glob('/home/mbmbertolero/data/gene_expression/sc_matrices/**/matrix.npy'):
+		bedpost_subjects.append(f.split('/')[-2])
+
+	all_subjects =  reduce(np.intersect1d,[task_subjects,rest_subjects,bedpost_subjects])
+	for subject in all_subjects:
+		task_files = np.loadtxt('/home/mbmbertolero/hcp/scripts/tfMRI/subject_lists/allsub_MSM_fMRI_list/%s_tfMRI_list_post_motion.txt'%(int(subject)),dtype=str)
+		rest_files = np.loadtxt('/home/mbmbertolero/hcp/scripts/rfMRI/subject_lists/allsub_MSM_ICA_FIX_fMRI_list/%s_rfMRI_list_post_motion.txt'%(int(subject)),dtype=str)
+		if rest_files.shape[0] != 4: continue
+		if np.isnan(task_performance([int(subject)],task))[0]: continue
+		subjects.append(int(subject))
+	subjects.sort()
+	return subjects
+
+def graph_metrics(subject,matrix):
+	"""
+	run graph metrics or load them
+	"""
+	try:
+		pc = np.load('/home/mbmbertolero/gene_expression/data//results/%s_%s_pcs.npy' %(subject,matrix))
+		wmd = np.load('/home/mbmbertolero/gene_expression/data//results/%s_%s_wmds.npy' %(subject,matrix))
+		mod = np.load('/home/mbmbertolero/gene_expression/data/results/%s_%s_mods.npy' %(subject,matrix))
+		m = np.load('/home/mbmbertolero/gene_expression/data/matrices/%s_%s_matrix.npy' %(subject,matrix))
+	except:
+		print 'running subject %s' %(subject)
+		if matrix == 'fc':
+			m = []
+			files = glob.glob('/home/mbmbertolero/hcp/matrices/yeo/*%s*REST*.txt' %(subject))
+			for f in files:
+				if 'random' in f: continue
+				f = np.loadtxt(f)
+				np.fill_diagonal(f,0.0)
+				f[np.isnan(f)] = 0.0
+				f = np.arctanh(f)
+				m.append(f)
+			m = np.nanmean(m,axis=0)
+			m = np.tril(m,-1) + np.tril(m,-1).transpose()
+		else: 
+			m = np.load('/home/mbmbertolero/data/gene_expression/sc_matrices/%s/matrix.npy'%(subject))
+			m = m + m.transpose()
+			m = np.tril(m,-1)
+			m = m + m.transpose()
+		num_nodes = m.shape[0]
+		pc = []
+		mod = []
+		wmd = []
+		for cost in np.linspace(1,10)*.01:
+			temp_matrix = m.copy()
+			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',mst=True)
+			del temp_matrix
+			graph = graph.community_infomap(edge_weights='weight')
+			graph = brain_graphs.brain_graph(graph)
+			pc.append(np.array(graph.pc))
+			wmd.append(np.array(graph.wmd))
+			mod.append(graph.community.modularity)
+			del graph
+		pc = np.nanmean(pc,axis=0)
+		wmd = np.nanmean(wmd,axis=0)
+		mod = np.nanmean(mod)
+		np.save('/home/mbmbertolero/gene_expression/data/results/%s_%s_pcs.npy' %(subject,matrix),pc)
+		np.save('/home/mbmbertolero/gene_expression/data/results/%s_%s_wmds.npy' %(subject,matrix),wmd)
+		np.save('/home/mbmbertolero/gene_expression/data/results/%s_%s_mods.npy' %(subject,matrix),mod)
+		np.save('/home/mbmbertolero/gene_expression/data/matrices/%s_%s_matrix.npy' %(subject,matrix),m)
+	return pc,wmd,mod,m
+
+def generate_correlation_map(x, y):
+	"""
+	Correlate each n with each m.
+	----------
+	Parameters
+
+	x : np.array, shape N X T.
+	y : np.array, shape M X T.
+	Returns: np.array, N X M array in which each element is a correlation coefficient.
+	----------
+	"""
+	mu_x = x.mean(1)
+	mu_y = y.mean(1)
+	n = x.shape[1]
+	if n != y.shape[1]:
+	    raise ValueError('x and y must ' +
+	                     'have the same number of timepoints.')
+	s_x = x.std(1, ddof=n - 1)
+	s_y = y.std(1, ddof=n - 1)
+	cov = np.dot(x,
+	             y.T) - n * np.dot(mu_x[:, np.newaxis],
+	                              mu_y[np.newaxis, :])
+	return cov / np.dot(s_x[:, np.newaxis], s_y[np.newaxis, :])
+
+def super_edge_predict_new(t):
+	fit_mask = np.ones((subject_pcs.shape[0])).astype(bool)
+	fit_mask[t] = False
+	if use_matrix == True:
+		flat_matrices = np.zeros((subject_pcs.shape[0],len(np.tril_indices(264,-1)[0])))
+		for s in range(subject_pcs.shape[0]):
+			m = matrices[s]
+			flat_matrices[s] = m[np.tril_indices(264,-1)]
+		
+		rest_perf_edge_corr = generate_correlation_map(task_perf[fit_mask].reshape(1,-1),flat_matrices[fit_mask].transpose())[0]
+		
+		rest_perf_edge_scores = np.zeros((subject_pcs.shape[0]))
+		for s in range(subject_pcs.shape[0]):
+			rest_perf_edge_scores[s] = pearsonr(flat_matrices[s],rest_perf_edge_corr)[0]
+
+	perf_pc_corr = np.zeros(subject_pcs.shape[1])
+	for i in range(subject_pcs.shape[1]):
+		perf_pc_corr[i] = nan_pearsonr(task_perf[fit_mask],subject_pcs[fit_mask,i])[0]
+	perf_wmd_corr = np.zeros(subject_wmds.shape[1])
+	for i in range(subject_wmds.shape[1]):
+		perf_wmd_corr[i] = nan_pearsonr(task_perf[fit_mask],subject_wmds[fit_mask,i])[0]
+
+	rest_pc = np.zeros(subject_pcs.shape[0])
+	rest_wmd = np.zeros(subject_pcs.shape[0])
+	for s in range(subject_pcs.shape[0]):
+		rest_pc[s] = nan_pearsonr(subject_pcs[s],perf_pc_corr)[0]
+		rest_wmd[s] = nan_pearsonr(subject_wmds[s],perf_wmd_corr)[0]
+
+	# pvals = np.array([rest_pc,rest_wmd,rest_perf_edge_scores,subject_mods]).transpose()
+	pvals = np.array([rest_pc,rest_wmd,subject_mods]).transpose()
+	neurons = (3,3)
+		
+	train = np.ones(len(pvals)).astype(bool)
+	train[t] = False
+	model = MLPRegressor(solver='lbfgs',hidden_layer_sizes=neurons,alpha=1e-5,random_state=t)
+	model.fit(pvals[train],task_perf[train])
+	result = model.predict(pvals[t].reshape(1, -1))[0]
+	return result
+
+def performance_across_tasks(matrix):
+	global subject_pcs
+	global subject_wmds
+	global subject_mods
+	global task_perf
+	global matrices
+	global use_matrix
+	use_matrix = True
+	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL','EMOTION']
+	loo_columns= ['Task','Predicted Performance','Performance']
+	loo_df = pd.DataFrame(columns = loo_columns)
+	for task in tasks:
+		subjects = get_subjects(task)
+		static_results = get_graphs(subjects,matrix)
+		subject_pcs = static_results['subject_pcs'].copy()
+		subject_wmds = static_results['subject_wmds']
+		matrices = static_results['matrices']
+		subject_mods = static_results['subject_mods']
+
+
+		task_perf = task_performance(subjects,task)
+
+		# if control_motion == True:
+		# 	task_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit().resid_response
+		# 	assert np.isclose(0.0,pearsonr(task_perf,subject_motion)[0]) == True
+
+		"""
+		prediction / cross validation
+		"""
+		pool = Pool(16)
+		nodal_prediction = pool.map(super_edge_predict_new,range(len(task_perf)))
+		del pool
+		result = pearsonr(np.array(nodal_prediction).reshape(-1),task_perf)
+		print 'Prediction of Performance: ', result
+		# sys.stdout.flush()
+		# loo_array = []
+		# for i in range(len(nodal_prediction)):
+		# 	loo_array.append([task,nodal_prediction[i],task_perf[i]])
+		# loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
+
+def sge(run_type,matrix):
+	"""
+	SGE stuff
+	"""
+	if run_type == 'graph_metrics':
+		for task in tasks:
+			subjects = get_subjects(task)
+			for s in subjects:
+				os.system("qsub -N gm_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r graph_metrics -s %s -task %s "%(s,s,task))
+
+	if run_type == 'find_genes':
+		for node in range(400):
+			if os.path.exists('/home/mbmbertolero/data/gene_expression/results/SA_fit_all_%s_False_True_%s.npy'%(matrix,node)): continue
+			os.system('qsub -binding linear:4 -pe unihost 4 -N fg_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r find_genes -m %s -n %s'%(node,matrix,node))
+	if run_type == 'sweep':
+		ln = []
+		for layers in range(1,16):
+			for nodes in [5,10,15,20,25,50,100,200,300]:
+				ln.append([nodes,layers])	
+		ln = np.array(ln)
+		for nodes,layers in ln[np.argsort(np.multiply(ln.transpose()[0],ln.transpose()[1]))]:
+			print nodes,layers
+			for matrix in ['fc','sc']:
+				os.system("qsub -binding linear:4 -pe unihost 4 -N pdt_%s_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -prediction genetic -r predict_role -m %s -layers %s -nodes %s "%(layers,nodes,matrix,layers,nodes))
+
+def run_all(matrix,topological,distance,network):
+	fit_matrix(matrix,topological,distance,network)
+	SA_find_genes(matrix,topological,distance,network,n_trys=50)
+
+ignore_nodes = np.where(np.nansum(gene_exp,axis=1)==0)[0]
+
+if run_type == 'find_genes':  SA_find_genes(matrix=matrix,network=network,cores=4)
+if run_type == 'predict_role': role_prediction(matrix,prediction,distance=True,topological=False,cores=4)
+if run_type == 'graph_metrics': 
+	graph_metrics(subject,task,'sc')
+	graph_metrics(subject,task,'fc')
 
 
 
-# build gene network where edges are the similarity of expression across the brain; what role do gene play in this network that maximize fit to FC?
 
-# run_all('fc',False,True,None)
-# run_all('fc',False,True,'Control')
-# run_all('fc',False,True,'Visual')
-# run_all('fc',False,True,'Motor')
-# run_all('fc',False,True,'Dorsal Attention')
-# run_all('fc',False,True,'Ventral Attention')
-# run_all('fc',False,True,'Temporal Parietal')
-# run_all('fc',False,True,'Limbic')
+
+
