@@ -26,6 +26,7 @@ from sklearn.linear_model import Ridge, RidgeClassifier
 from sklearn.svm import SVR
 import statsmodels.api as sm
 import time
+from subprocess import Popen, PIPE
 from matplotlib import rc
 # rc('text', usetex = False)
 import glob
@@ -37,6 +38,7 @@ sns.plt = plt
 import matplotlib as mpl
 from matplotlib import patches
 import math
+from pandas_plink import read_plink
 from statsmodels.stats.multitest import fdrcorrection
 plt.rcParams['pdf.fonttype'] = 42
 # mpl.font_manager.FontProperties(family='sans-serif',style='oblique',fname='/home/mbmbertolero/data/Helvetica/Helvetica-Oblique.ttf')
@@ -83,6 +85,7 @@ parser.add_argument('-m',action='store',dest='matrix',default='fc')
 parser.add_argument('-layers',action='store',dest='n_layers',type=int,default=1)
 parser.add_argument('-name',action='store',dest='name',type=str,default='participation coefficient')
 parser.add_argument('-nodes',action='store',dest='n_nodes',type=int,default=5)
+parser.add_argument('-node',action='store',dest='node',type=int,default=0)
 parser.add_argument('-n_genes',action='store',dest='n_genes',type=int,default=50)
 parser.add_argument('-n',action='store',dest='network')
 parser.add_argument('-task',action='store',dest='task',type=int)
@@ -114,8 +117,8 @@ Globals for neural network behavior prediction
 global subject_pcs
 global subject_wmds
 global subject_mods
-global rest_subject_pcs 
-global rest_subject_wmds 
+global rest_subject_pcs
+global rest_subject_wmds
 global rest_subject_mods
 global task_perf
 global task_matrices
@@ -129,9 +132,9 @@ def write_cifti(atlas_path,out_path,colors):
 	os.system('wb_command -cifti-label-export-table %s 1 temp.txt'%(atlas_path))
 	df = pd.read_csv('temp.txt',header=None)
 	for i in range(df.shape[0]):
-		try: 
+		try:
 			d = np.array(df[0][i].split(' ')).astype(int)
-		except: 
+		except:
 			continue
 		real_idx = d[0] -1
 		df[0][i] = str(d[0]) + ' ' + str(int(colors[real_idx][0]*255)) + ' ' + str(int(colors[real_idx][1]*255)) + ' ' + str(int(colors[real_idx][2]*255)) + ' ' + str(255)
@@ -165,7 +168,7 @@ def nan_pearsonr(x,y):
 	return pearsonr(x[mask],y[mask])
 
 def three_d_dist(p1,p2):
-	return math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2 + (p2[2] - p1[2]) ** 2)  
+	return math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2 + (p2[2] - p1[2]) ** 2)
 
 def real_2_mm(target_image, real_pt):
 	aff = target_image.affine
@@ -174,7 +177,7 @@ def real_2_mm(target_image, real_pt):
 def make_well_id_2_mni(subjects=['9861','178238266','178238316','178238373','15697','178238359']):
 	"""
 	loop through subjects, load thier specific well ids
-	well_id_2_idx: assign an index for the well by expression array to each well ID. 
+	well_id_2_idx: assign an index for the well by expression array to each well ID.
 	well_id_2_mni: get the locatino of each well in MNI array space, using the Poldrack lab transform (well_id_to_MNI)
 	"""
 	print 'making well to MNI mapping'
@@ -192,7 +195,7 @@ def make_well_id_2_mni(subjects=['9861','178238266','178238316','178238373','156
 		well_ids = pd.read_csv('/home/mbmbertolero/data/gene_expression/data/%s/SampleAnnot.csv'%(subject))['well_id'].values
 		for well_id in well_ids:
 			assert well_id not in well_id_2_idx.keys() #make sure there is not some weird duplicate across subjects
-			well_id_2_idx[well_id] = well_idx #assign an index for the well by expression array to each well ID. 
+			well_id_2_idx[well_id] = well_idx #assign an index for the well by expression array to each well ID.
 			well_idx = well_idx + 1 #increase index for next well in loop
 			loc=np.where(well_id_to_mni['well_id']==well_id)[0][0] #look up the MNI coordinates in the .csv file for this well
 			# get the xyz coordinates into ints
@@ -202,13 +205,13 @@ def make_well_id_2_mni(subjects=['9861','178238266','178238316','178238373','156
 			well_id_2_mni[well_id] = [[x,y,z]] # save it to the dictionary
 			# we are going to normalize by expression across cortex, ignoring sub-cortical and cerebellar stuff
 			# so we find, for each well, where it is.
-			if cortical[x,y,z] > 0: 
+			if cortical[x,y,z] > 0:
 				well_id_2_struct[well_id] = 'cortical'
 				continue
-			elif cerebellar[x,y,z] > 0: 
+			elif cerebellar[x,y,z] > 0:
 				well_id_2_struct[well_id] = 'cerebellar'
 				continue
-			else: 
+			else:
 				well_id_2_struct[well_id] = 'sub_cortical'
 				continue
 
@@ -219,16 +222,18 @@ make_well_id_2_mni()
 # array_mapping.to_csv('volume_2_array_mapping.csv')
 
 def get_genes():
-	# genes from previous study we want to look at
-	gene_df = pd.read_excel('/home/mbmbertolero/data//gene_expression/data/Richiardi_Data_File_S2.xlsx')
-	# load the probes, so we can remove some genes from the analysis
-	probes = pd.read_csv('//home/mbmbertolero/data//gene_expression/data/9861/Probes.csv')
-	genes = []
-	for probe in gene_df.probe_id.values:
-		genes.append(probes.gene_symbol.values[probes.probe_name.values==probe])
-	genes = np.unique(genes)
-	genes.sort()
-	np.save('/home/mbmbertolero/data//gene_expression/gene_names.npy',genes)
+	try:genes= np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
+	except:
+		# genes from previous study we want to look at
+		gene_df = pd.read_excel('/home/mbmbertolero/data//gene_expression/data/Richiardi_Data_File_S2.xlsx')
+		# load the probes, so we can remove some genes from the analysis
+		probes = pd.read_csv('//home/mbmbertolero/data//gene_expression/data/9861/Probes.csv')
+		genes = []
+		for probe in gene_df.probe_id.values:
+			genes.append(probes.gene_symbol.values[probes.probe_name.values==probe])
+		genes = np.unique(genes)
+		genes.sort()
+		np.save('/home/mbmbertolero/data//gene_expression/gene_names.npy',genes)
 	return genes
 
 def gene_expression_matrix(norm=norm,subjects=['9861','178238266','178238316','178238373','15697','178238359']):
@@ -240,7 +245,7 @@ def gene_expression_matrix(norm=norm,subjects=['9861','178238266','178238316','1
 		genes = np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
 		# we want to make numpy array, where d1 is the well (brain location) and d2 is the expression of all genes
 		well_by_expression_array = np.zeros((len(well_id_2_idx),len(genes)))
-		
+
 		for subject in subjects:
 			#load the wells, so we know where in the brain the expression is
 			wells = pd.read_csv('//home/mbmbertolero/data//gene_expression/data/%s/SampleAnnot.csv'%(subject))['well_id'].values
@@ -277,7 +282,7 @@ def gene_expression_matrix(norm=norm,subjects=['9861','178238266','178238316','1
 					e.append(full_expression[idx])
 				e = np.array(e)
 				if norm:# we want to normalize by mean expression in cortex
-					for idx in range(e.shape[0]): #normalize by each probe for that genes expression across cortex
+					for idx in range(e.shape[0]): #normalize by each probe for that gene's expression across cortex
 						e[idx] = e[idx] - np.mean(e[idx][cortical_a])
 				expression[expression_idx] = np.mean(e,axis=0) # get the mean across probes for this gene
 			#turn into a well by gene expression matrix
@@ -357,7 +362,7 @@ def functional_connectivity(topological=False,distance=True,network=None):
 			matrix.append(m.copy())
 		matrix = np.nanmean(matrix,axis=0)
 		np.save('/home/mbmbertolero/data/gene_expression/data/matrices/mean_fc.npy',matrix)
-	
+
 	if topological == True:
 		temp_matrix = matrix.copy()
 		for i,j in combinations(range(matrix.shape[0]),2):
@@ -380,7 +385,7 @@ def structural_connectivity(topological=False,distance=True,network=None):
 	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
 	for i,n in enumerate(yeo_df):
 		membership[i] = reduce_dict[n.split('_')[2]]
-	try: 
+	try:
 		matrix = np.load('/home/mbmbertolero/data/gene_expression/data/matrices/sc_matrix.npy')
 	except:
 		matrix = []
@@ -448,10 +453,42 @@ def avg_graph_metrics(matrix,topological=False,distance=True):
 	wcd = np.nanmean(wcd,axis=0)
 	degree = np.nanmean(degree,axis=0)
 	between = np.nanmean(between,axis=0)
-	np.save('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix),pc)
-	np.save('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix),degree)
-	np.save('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix),wcd)
-	np.save('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix),between)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_pc_%s.npy'%(matrix,distance),pc)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_strength_%s.npy'%(matrix,distance),degree)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_wcd_%s.npy'%(matrix,distance),wcd)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_between_%s.npy'%(matrix,distance),between)
+	"""
+	files = glob.glob('/home/mbmbertolero/gene_expression/data/matrices/*%s_matrix*'%(matrix))
+	pc = []
+	wcd = []
+	degree = []
+	between = []
+	if distance: distance_matrix = atlas_distance()
+	for f in files:
+		print f
+		m = np.load(f)
+		m = m + m.transpose()
+		m = np.tril(m,-1)
+		m = m + m.transpose()
+		if distance:
+			np.fill_diagonal(m,np.nan)
+			m[np.isnan(m)==False] = sm.GLM(m[np.isnan(m)==False],sm.add_constant(distance_matrix[np.isnan(m)==False])).fit().resid_response
+		for cost in np.linspace(0.05,0.10,5):
+			g = brain_graphs.matrix_to_igraph(m.copy(),cost=cost,mst=True)
+			g = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+			pc.append(g.pc)
+			wcd.append(g.wmd)
+			degree.append(g.community.graph.strength(weights='weight'))
+			between.append(g.community.graph.betweenness())
+	pc = np.nanmean(pc,axis=0)
+	wcd = np.nanmean(wcd,axis=0)
+	degree = np.nanmean(degree,axis=0)
+	between = np.nanmean(between,axis=0)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_sub_pc_%s.npy'%(matrix,distance),pc)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_sub_strength_%s.npy'%(matrix,distance),degree)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_sub_wcd_%s.npy'%(matrix,distance),wcd)
+	np.save('/home/mbmbertolero/data/gene_expression/results/%s_sub_between_%s.npy'%(matrix,distance),between)
+	"""
 
 def plot_distance():
 	"""
@@ -505,7 +542,7 @@ def fit_matrix_multi(ignore_idx):
 	global co_a_matrix
 	global gene_exp
 	if corr_method == 'pearsonr': temp_m = np.corrcoef(gene_exp[:,np.arange(gene_exp.shape[1])!=ignore_idx])
-	if corr_method == 'spearmanr': 
+	if corr_method == 'spearmanr':
 		temp_m = spearmanr(gene_exp[:,np.arange(gene_exp.shape[1])!=ignore_idx],axis=1)[0]
 		temp_m[ignore_nodes,:] = np.nan
 		temp_m[:,ignore_nodes] = np.nan
@@ -531,7 +568,7 @@ def fit_SA(indices_for_correlation):
 	global gene_exp #grab the "timeseries" of gene expression, well id by gene expression value shape
 	#get correlation matrix for select genes
 	if corr_method == 'pearsonr': temp_m = np.corrcoef(gene_exp[:,np.ix_(indices_for_correlation)][:,0,:])
-	if corr_method == 'spearmanr': 
+	if corr_method == 'spearmanr':
 		temp_m = spearmanr(gene_exp[:,np.ix_(indices_for_correlation)][:,0,:],axis=1)[0]
 		temp_m[ignore_nodes,:] = np.nan
 		temp_m[:,ignore_nodes] = np.nan
@@ -553,7 +590,7 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 	# cores=4
 	#set number of cores depending on which node we are on
 	# cores= multiprocessing.cpu_count()-1
-	
+
 	# grab the coact/fc/sc matrix global variable, which we will assing the matrix we are anylzing to
 	# we have to use global variable, as we want to use a lot of cores
 	global co_a_matrix
@@ -575,11 +612,11 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 	current_r = nan_pearsonr(co_a_matrix[network].flatten(),initial_m[network].flatten())[0]
 	print 'start with a fit of: %s' %(str(current_r))
 
-	
+
 	# set multiprocessing to have the number of cores requested
 	if cores > 1: pool = Pool(cores)
 	temp = start_temp # set the initial temp
-	save_results = [] 
+	save_results = []
 	while True:
 		# set temperature as a proportion of genes to swap in and out of coexpression matrix formulation
 		# as temp lowers, we remove fewer and few genes
@@ -589,7 +626,7 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 		for i in range(n_trys): #find n_trys selections to try
 			temp_genes = set(current_genes.copy())
 			# find genes to remove, bias towards genes that decreased fit
-			if use_prs: 
+			if use_prs:
 				remove_prs = 1-prs[current_genes]
 				remove_prs = remove_prs/np.sum(remove_prs) #renormalize
 				remove_genes = set(np.random.choice(current_genes,int(current_temp),False,remove_prs))
@@ -598,23 +635,23 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 			for gene in remove_genes: temp_genes.remove(gene)
 			# find genes to add, bias towards genes that increased fit
 			while True: # we have to ensure it gets back to n_genes, since it can select genes aready in the set
-				if use_prs: 
+				if use_prs:
 					temp_genes.add(np.random.choice(gene_exp.shape[1],1,False,prs)[0])
-				else: 
+				else:
 					temp_genes.add(np.random.choice(gene_exp.shape[1],1,False)[0])
 				if len(temp_genes) == n_genes: break
 			# save it to the array we are going to send to the multiprocessing function
 			potential_indices[i] = np.array(list(temp_genes))
 		#send to fit function, which calculates fit of gene coexpression to whatever matrix was selected
 		if cores > 0: results = pool.map(fit_SA,potential_indices)
-		else: 
+		else:
 			results = []
 			for pi in potential_indices: results.append(fit_SA(pi))
 		results = np.array(results)
-		# what is the value of the best fit? 
+		# what is the value of the best fit?
 		new_max = np.max(results)
 		# did it do better than we previously did?
-		if new_max > current_r: 
+		if new_max > current_r:
 			# if so set current r and current genes one to the current best
 			current_r = new_max
 			current_genes = potential_indices[np.argmax(results)]
@@ -626,19 +663,20 @@ def SA_find_genes(matrix,topological=False,distance=True,network=None,n_genes=10
 		# decrease temp
 		temp = temp - temp_step
 		# is the temp too low?
-		if temp < end_temp: 
+		if temp < end_temp:
 			break
-		if int(n_genes * temp) ==0: 
+		if int(n_genes * temp) ==0:
 			break
 			# for small amount of n_genes, need this or it gets stuck.
-	np.save('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,network,n_genes,use_prs,norm,corr_method),np.array(save_results))
+	# np.save('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,network,n_genes,use_prs,norm,corr_method),np.array(save_results))
+	np.save('/home/mbmbertolero/data/gene_expression/final_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,network,n_genes,use_prs,norm,corr_method),np.array(save_results))
 
 def fit_random(indices_for_correlation):
 	global co_a_matrix #grab the matrix we are working with
 	global random_gene_exp #grab the "timeseries" of gene expression, well id by gene expression value shape
 	#get correlation matrix for select genes
 	if corr_method == 'pearsonr': temp_m = np.corrcoef(random_gene_exp[:,np.ix_(indices_for_correlation)][:,0,:])
-	if corr_method == 'spearmanr': 
+	if corr_method == 'spearmanr':
 		temp_m = spearmanr(random_gene_exp[:,np.ix_(indices_for_correlation)][:,0,:],axis=1)[0]
 		temp_m[ignore_nodes,:] = np.nan
 		temp_m[:,ignore_nodes] = np.nan
@@ -724,7 +762,7 @@ def analyze_null(matrix,topological=False,distance=True,network=None,n_genes=100
 	for i in range(200):
 		if i in ignore_nodes: continue
 		fit_better [i] = scipy.stats.ttest_1samp(fits[i],df.fit[df.node==i])[0] * -1
-		
+
 def plot_random_n_genes(null_type = 'random',topological=False,distance=True,corr_method = 'pearsonr',):
 
 	fc_pc = np.load('/home/mbmbertolero/data/gene_expression/results/fc_pc.npy')[:200]
@@ -756,7 +794,7 @@ def plot_random_n_genes(null_type = 'random',topological=False,distance=True,cor
 			tdf['real fit'] = [real_sc_df[(real_sc_df['node']==i) & (real_sc_df['n_genes']==n_genes)].fit.values[0]]
 			tdf['connectivity'] = 'structural'
 			df = df.append(tdf,ignore_index=True)
-	
+
 	c1,c2 = sns.cubehelix_palette(10, rot=.25, light=.7)[0],sns.cubehelix_palette(10, rot=-.25, light=.7)[0]
 	sns.set(context="paper",font_scale=2,font='Open Sans',style='whitegrid',palette="pastel",color_codes=True)
 	fig = plt.figure(figsize=(14.3,8))
@@ -858,7 +896,7 @@ def generate_for_ann(matrix):
 	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))[:200][mask]
 	pc[pc>np.percentile(pc,80)] = 1
 	pc[pc!=1] = 0
-	rank = np.load('/home/mbmbertolero/data/gene_expression/norm_results/%s_pearsonr_genes.npy'%(matrix)) 
+	rank = np.load('/home/mbmbertolero/data/gene_expression/norm_results/%s_pearsonr_genes.npy'%(matrix))
 	names = np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
 	np.savetxt('/home/mbmbertolero/data/gene_expression/ann/gene_names.txt',names,fmt='%s')
 	np.savetxt('/home/mbmbertolero/data/gene_expression/ann/%s_gene_ranks.txt'%(matrix),rank[mask])
@@ -912,7 +950,7 @@ def plot_gorilla(matrix):
 		df = df.append(t_df)
 	for e in df.Description:
 		if len(e)>50:
-			df.Description[df.Description==e] = two_lines(e) 
+			df.Description[df.Description==e] = two_lines(e)
 	if biggest <= 50: biggest = 50
 	all_locs = (np.arange(biggest+2)/float(biggest+2))[1:]
 	left, width = 0, 1
@@ -943,10 +981,10 @@ def plot_gorilla(matrix):
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/gorilla_%s.pdf'%(matrix))
 
 def log_p_value(p):
-	if p > 0.001: 
+	if p > 0.001:
 		p = np.around(p,3)
 		p = "$\it{p}$=%s"%(p)
-	else: 
+	else:
 		p = (-1) * np.log10(p)
 		p = "-log10($\it{p}$)=%s"%(np.around(p,0).astype(int))
 	return p
@@ -978,7 +1016,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 			p_gene_exp_matrix[:,ignore_nodes] = np.nan
 			p_gene_exp_matrix = p_gene_exp_matrix[node]
 			p_gene_exp_matrix = p_gene_exp_matrix[np.isnan(p_gene_exp_matrix)==False]
-			
+
 			s_gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,'spearmanr'))[-1]
 			s_gene_exp_matrix = spearmanr(gene_exp[:,s_gene_exp_matrix],axis=1)[0]
 			s_gene_exp_matrix[ignore_nodes,:] = np.nan
@@ -1048,6 +1086,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/pearsonr_v_spearmanr_%s.pdf'%(matrix))
 	sns.plt.show()
+	"""
 	# df = pd.read_csv('/home/mbmbertolero/gene_expression/results/%s_True_pearsonr_False_fits_df.csv'%(matrix))
 	# df['similarity metric'] = 'pearsonr'
 	# # df.rename(columns={'n_genes': 'number of genes', 'fit': 'genetic fit'}, inplace=True)
@@ -1060,7 +1099,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 	# n_gene_array = df['number of genes'].unique()
 
 	# sns.set(context="paper",font_scale=1.75,font='Helvetica',style='white',palette="pastel")
-	# fig = plt.figure(figsize=(14.3,8)) 
+	# fig = plt.figure(figsize=(14.3,8))
 	# g = sns.violinplot(x="number of genes", y="genetic fit", hue="similarity metric",data=df, palette="pastel",split=True,inner="quartile")
 	# for x in range(len(n_gene_array)):
 	# 	n_genes = n_gene_array[x]
@@ -1073,6 +1112,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 	# sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/pearsonr_v_spearmanr.pdf')
 	# sns.plt.show()
 	# print pearsonr(df.groupby('node')['genetic fit, pearsonr'].mean(),df.groupby('node')['genetic fit, spearmanr'].mean())
+	"""
 
 def co_exp_figure():
 	matrix = 'fc'
@@ -1144,7 +1184,13 @@ def co_exp_figure():
 	h2.set_xticks([],[])
 	plt.savefig('coexpression_example_con.pdf')
 
-def make_fit_df(matrix,use_prs,norm,corr_method,distance=True,topological=False,):
+def make_fit_df(matrix,use_prs,norm,corr_method,distance=True,topological=False):
+	# matrix = 'fc'
+	# use_prs = False
+	# norm = True
+	# corr_method = 'spearmanr'
+	# distance = True
+	# topological = False
 	sns.set(context="notebook",font='Helvetica',style='white')
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
@@ -1167,11 +1213,19 @@ def make_fit_df(matrix,use_prs,norm,corr_method,distance=True,topological=False,
 	strength = np.load('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix))
 	wcs = np.load('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix))
 	between = np.load('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix))
+
+	# subjects = get_subjects(done='graphs')
+	# static_results = get_graphs(subjects,matrix)
+	# pc = np.nanmean(static_results['subject_pcs'],axis=0)
+	# wcs = np.nanmean(static_results['subject_wmds'],axis=0)
+
 	df = pd.DataFrame(columns=['node','fit','network','participation coefficient','within community strength','strength','betweenness','n_genes'])
 	for n_genes in [15,25,35,50,75,100,125,150,175,200]:
+	# for n_genes in [50]:
 		for node,name,pc_val,wcs_val,strength_val,b_val in zip(range(m.shape[0]),membership,pc,wcs,strength,between):
 			if node in ignore_nodes: continue
-			gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
+			# gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
+			gene_exp_matrix = np.load('/home/mbmbertolero/data/gene_expression/final_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
 			if corr_method == 'pearsonr': gene_exp_matrix = np.corrcoef(gene_exp[:,gene_exp_matrix])
 			if corr_method == 'spearmanr':
 				gene_exp_matrix = spearmanr(gene_exp[:,gene_exp_matrix],axis=1)[0]
@@ -1184,7 +1238,12 @@ def make_fit_df(matrix,use_prs,norm,corr_method,distance=True,topological=False,
 	df['strength'] = df['strength'].astype(float)
 	df['within community strength'] = df['within community strength'].astype(float)
 	df['betweenness'] = df['betweenness'].astype(float)
-	df.to_csv('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_fits_df.csv'%(matrix,norm,corr_method,use_prs))
+	df['fit'] = df['fit'].astype(float)
+	# df.to_csv('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_fits_df.csv'%(matrix,norm,corr_method,use_prs))
+	df.to_csv('/home/mbmbertolero/data/gene_expression/final_results/%s_%s_%s_%s_fits_df.csv'%(matrix,norm,corr_method,use_prs))
+
+	old_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_fits_df.csv'%(matrix,norm,corr_method,use_prs))
+	old_df = old_df[old_df.n_genes==50]
 
 def compare_n_genes(corr_method = 'pearsonr'):
 	fc_df = pd.read_csv('/home/mbmbertolero/gene_expression/results/fc_True_%s_False_fits_df.csv'%(corr_method))
@@ -1229,7 +1288,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 		ax.text(max(x),.7,'$\it{r}$=%s\n%s' %(np.around(r,3),log_p_value(p)),{'fontsize':12},horizontalalignment='center')
 	for idx,ax in enumerate(g.axes):
 		n_genes = n_gene_array[idx]
-		ax.set_title(n_genes,color=pal[idx])		
+		ax.set_title(n_genes,color=pal[idx])
 	sns.plt.tight_layout()
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/n_genes_pc_fc_%s.pdf'%(corr_method))
 	sns.plt.close()
@@ -1264,7 +1323,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 	heatmap.set_yticklabels(np.flip(np.array(n_gene_array),0))
 	plt.ylabel('number of genes')
 	plt.xlabel('number of genes')
-	plt.yticks(rotation=0) 
+	plt.yticks(rotation=0)
 	sns.plt.tight_layout()
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/n_genes_fc_corr_%s.pdf'%(corr_method))
 	sns.plt.close()
@@ -1282,7 +1341,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 	heatmap = sns.heatmap(sc_m,cmap=sns.cubehelix_palette(10, rot=-.25, light=.7,as_cmap=True),vmin=.4,vmax=.85,square=True)
 	heatmap.set_xticklabels(n_gene_array)
 	heatmap.set_yticklabels(np.flip(np.array(n_gene_array),0))
-	plt.yticks(rotation=0) 
+	plt.yticks(rotation=0)
 	plt.ylabel('number of genes')
 	plt.xlabel('number of genes')
 	sns.plt.tight_layout()
@@ -1302,7 +1361,7 @@ def consensus_genes(matrix='fc',n_genes=100):
 	membership = np.zeros((200)).astype(str)
 	small_membership = np.zeros((200)).astype(str)
 	membership_ints = np.zeros((200)).astype(int)
-	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:200]	
+	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:200]
 
 	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default','Temporal Parietal']
 	for i,n in enumerate(yeo_df):
@@ -1454,7 +1513,7 @@ def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_d
 	membership_ints = np.zeros((400)).astype(int)
 	yeo_df = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])['name'].values[1:]
 	# yeo_colors = pd.read_csv('/home/mbmbertolero/data/PUBLIC/yeo/MNI152/Schaefer2016_400Parcels_17Networks_colors_23_05_16.txt',sep='\t',header=None,names=['name','R','G','B','0'])
-	# colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
+	# yeo_colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
 	yeo_colors = pd.read_csv('/home/mbmbertolero/gene_expression/yeo_colors.txt',header=None,names=['name','r','g','b'],index_col=0)
 	yeo_colors = yeo_colors.sort_values('name')
 	yeo_colors = np.array([yeo_colors['r'],yeo_colors['g'],yeo_colors['b']]).transpose() /256.
@@ -1489,7 +1548,7 @@ def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_d
 	# df = df.me
 
 	print pearsonr(df.fit,other_df.fit)
-	
+
 	t,p=scipy.stats.ttest_ind(df.fit,other_df.fit)
 	print t, np.log10(p)
 	print '--------'
@@ -1519,7 +1578,7 @@ def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_d
 	r,p = pearsonr(df['participation coefficient'],df.fit)
 	# subplots[0].text(np.max(df.fit)*.9,np.max(df['participation coefficient'])*.9,'$\it{r}$=%s\n%s'%(np.around(r,2),log_p_value(p)))
 	subplots[0].text(np.max(df.fit)*.9,np.max(df['participation coefficient'])*.9,'$\it{r}$=%s\n%s'%(np.around(r,2),log_p_value(p)))
-	
+
 	rplot = sns.regplot(data=df,y='participation coefficient',x='fit',color=pal[0],ax=subplots[0])
 	subplots[0].set_xlabel('genetic fit')
 	a = sns.violinplot(data=df,x='network',y='fit',palette=colors,order=order,ax=subplots[1],width=1)
@@ -1534,7 +1593,7 @@ def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_d
 	# s.spines['bottom'].set_visible(False)
 	# s.spines['left'].set_visible(False)
 	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/network_fits_and_pccorr_%s_%s.pdf'%(matrix,corr_method))
+	# sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/network_fits_and_pccorr_%s_%s.pdf'%(matrix,corr_method))
 	sns.plt.show()
 
 def compare_genetic_fits(corr_method='pearsonr',n_genes=50):
@@ -1677,7 +1736,7 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 	for node,name,pval,w,d,b,m in zip(range(200),membership,pc,wcd,degree,between,membership):
 		if node in ignore_nodes: continue
 		gene = np.array([])
-		for n_genes in [15,25,35,50,75,100,125,150,175,200]: 
+		for n_genes in [15,25,35,50,75,100,125,150,175,200]:
 			try:xgene = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
 			except:
 				print n_genes,node
@@ -1701,7 +1760,7 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 		g_b_array[:] = 0
 		for ga in df.gene[df.node==node].values:
 			for g in ga:
-				g_b_array[g_array==g] = g_b_array[g_array==g]  + 1 
+				g_b_array[g_array==g] = g_b_array[g_array==g]  + 1
 		features[node,:] = g_b_array
 	features = features.astype(int)
 
@@ -1713,12 +1772,12 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 	mask[ignore_nodes] = False
 	membership = membership[mask]
 	features = features[mask]
-	
+
 	size = features.shape[0]
 	"""
 	predict the nodal values of a node based on which genes maximize its fit to FC
 	"""
-	
+
 	for name in ['participation coefficient','betweenness','strength','within community strength']:
 		measure = np.array(df.groupby('node').mean()[name].values)
 		pool = Pool(cores)
@@ -1728,9 +1787,9 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s.npy'%(matrix,name.replace(' ','_'),corr_method),prediction_array)
 		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s_true.npy'%(matrix,name.replace(' ','_'),corr_method),measure)
 
-	
+
 	measure = membership_ints[mask]
-	
+
 	# prediction_array = np.zeros((size))
 	# for i,node in enumerate(range(size)):
 	# 	model = RidgeClassifier(alpha=1.0)
@@ -1800,12 +1859,12 @@ def plot_role_prediction(matrix = 'fc'):
 	for i,m in enumerate(g.hue_names):
 		p = pearsonr(df['prediction'][df['nodal metric']==m].values,df['observed'][df['nodal metric']==m].values)
 		r,p = p[0],p[1]
-		
+
 		g.axes[i].annotate('$\it{r}$=%s\n%s'%(np.around(r,2),log_p_value(p)),xy=(0.7, 0.1), xycoords=g.axes[i].transAxes)
-		g.axes[i].set_title(order[i],color=pal[i])	
+		g.axes[i].set_title(order[i],color=pal[i])
 	sns.plt.tight_layout()
 	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/new_figures/predict_%s_with_%s.pdf'%(matrix,prediction))
-	sns.plt.show()	
+	sns.plt.show()
 
 	yeo_colors = pd.read_csv('/home/mbmbertolero/gene_expression/yeo_colors.txt',header=None,names=['name','r','g','b'],index_col=0)
 	yeo_colors = np.array([yeo_colors['r'],yeo_colors['g'],yeo_colors['b']]).transpose() /256.
@@ -1817,7 +1876,7 @@ def plot_role_prediction(matrix = 'fc'):
 	write_cifti_colors = []
 	p_i = 0
 	for i in range(200):
-		if mask[i] == False: 
+		if mask[i] == False:
 			write_cifti_colors.append([201/256.,201/256.,201/256.])
 			continue
 		if mask[i] == True:
@@ -1830,23 +1889,25 @@ def plot_role_prediction(matrix = 'fc'):
 	write_cifti_real = np.zeros((400,3))
 	write_cifti_colors = []
 	for i in range(200):
-		if mask[i] == False: 
+		if mask[i] == False:
 			write_cifti_colors.append([201/256.,201/256.,201/256.])
 			continue
 		if mask[i] == True:
 			write_cifti_colors.append(yeo_colors[membership_ints[i]])
 	write_cifti_real[:200] = write_cifti_colors
 	write_cifti('/home/mbmbertolero/data/PUBLIC/yeo/fsLR32k/Schaefer2016_400Parcels_17Networks_colors_23_05_16.dlabel.nii','/home/mbmbertolero/gene_expression/new_figures/real_network_%s'%(matrix),write_cifti_real)
-
+	"""
 	# image = np.ones((7,51,3))
 	# # image[ignore_nodes] = [1,1,1]
 	# for i in range(7):
 	# 	for pidx,p in enumerate(prediction_array[measure==i]):
 	# 		print pidx
 	# 		image[i,pidx] = yeo_colors[p]
+	"""
 
 def task_performance(subjects,task):
-	df = pd.read_csv('//home/mbmbertolero//S900_Release_Subjects_Demographics.csv')
+	# df = pd.read_csv('//home/mbmbertolero//S900_Release_Subjects_Demographics.csv')
+	df = pd.read_csv('//home/mbmbertolero/hcp/S1200.csv')
 	performance = []
 	if task == 'EMOTION':
 		emotion_df = pd.DataFrame(np.array([df.Subject,df['Emotion_Task_Median_RT'],df['Emotion_Task_Acc']]).transpose(),columns=['Subject','RT','ACC']).dropna()
@@ -1859,7 +1920,7 @@ def task_performance(subjects,task):
 				performance.append(np.nan)
 				continue
 			performance.append(temp_df['ACC'].values[0])
-	if task == 'WM': 
+	if task == 'WM':
 		wm_df = pd.DataFrame(np.array([df.Subject.values,df['WM_Task_Acc'].values,df['WM_Task_Median_RT'].values]).transpose(),columns=['Subject','ACC','RT']).dropna()
 		wm_df['RT'] = wm_df['RT'].values * -1
 		wm_df['RT'] = scipy.stats.zscore(wm_df['RT'].values)
@@ -1872,7 +1933,7 @@ def task_performance(subjects,task):
 	if task == 'RELATIONAL':
 		for subject in subjects:
 			performance.append(df['Relational_Task_Acc'][df.Subject == subject].values[0])
-	if task == 'LANGUAGE': 
+	if task == 'LANGUAGE':
 		for subject in subjects:
 			performance.append(np.nanmax([df['Language_Task_Story_Avg_Difficulty_Level'][df.Subject == subject].values[0],df['Language_Task_Math_Avg_Difficulty_Level'][df.Subject == subject].values[0]]))
 	if task == 'SOCIAL':
@@ -1886,7 +1947,7 @@ def task_performance(subjects,task):
 	return np.array(performance)
 
 def adult_changes():
-	try: 
+	try:
 		changes = np.load('/home/mbmbertolero/gene_expression/results/adult_changes.npy')
 	except:
 		changes = np.zeros((400,400))
@@ -1907,13 +1968,13 @@ def get_dev_df(task='restingstate'):
 	behav = pd.read_csv('//data/joy/BBL-extend/share/pncNbackNmf/subjectData/n1601_cnb_factor_scores_tymoore_20151006.csv')
 	df = pd.read_csv('//data/joy/BBL-extend/share/pncNbackNmf/subjectData/n1601_demographics_go1_20161212.csv')
 	df = pd.merge(df,behav,on='scanid')
-	if task == 'restingstate' or task == 'both': 
+	if task == 'restingstate' or task == 'both':
 		m_file = pd.read_csv('//data/joy/BBL-extend/share/pncNbackNmf/subjectData/n1601_RestQAData_20170509.csv')
 		df = pd.merge(df,m_file,on='scanid',how='left')
-	if task == 'nback' or task == 'both': 
+	if task == 'nback' or task == 'both':
 		m_file = pd.read_csv('//data/joy/BBL-extend/share/pncNbackNmf/subjectData/n1601_NbackConnectQAData_20170718.csv')
 		df = pd.merge(df,m_file,on='scanid',how='left')
-	
+
 	# df['motion'] = np.zeros(df.shape[0])
 	# for i,s in enumerate(df.scanid.values):
 	# 	df['motion'][i] = m_file['restRelMeanRMSMotion'][m_file.scanid==s]
@@ -1922,7 +1983,7 @@ def get_dev_df(task='restingstate'):
 	subjects = df.scanid.values
 	for s in subjects:
 		if task == 'both':
-			rs = os.path.exists('/home/mbmbertolero/gene_expression/pnc_matrices/%s_%s_matrix.npy'%(s,'restingstate')) 
+			rs = os.path.exists('/home/mbmbertolero/gene_expression/pnc_matrices/%s_%s_matrix.npy'%(s,'restingstate'))
 			nb = os.path.exists('/home/mbmbertolero/gene_expression/pnc_matrices/%s_%s_matrix.npy'%(s,'nback'))
 			if rs == False or nb == False: df = df[df.scanid!=s]
 		else:
@@ -2003,7 +2064,7 @@ def get_dev_graphs(subjects,matrix):
 	return results
 
 def dev_matrices(subjects,task = 'restingstate',distance=True):
-	
+
 	df = pd.read_csv('//data/joy/BBL-extend/share/pncNbackNmf/subjectData/n1601_demographics_go1_20161212.csv')
 	ages = []
 	ms = []
@@ -2027,7 +2088,7 @@ def dev_sc_matrices(distance=True):
 		m = scipy.spatial.distance.squareform(np.array(m.split(',')).astype(float))
 		if distance:
 			np.fill_diagonal(m,np.nan)
-			m[np.isnan(m)==False] = sm.GLM(m[np.isnan(m)==False],sm.add_constant(distance_matrix[np.isnan(m)==False])).fit().resid_response				
+			m[np.isnan(m)==False] = sm.GLM(m[np.isnan(m)==False],sm.add_constant(distance_matrix[np.isnan(m)==False])).fit().resid_response
 		ms.append(m)
 	ms = np.array(ms)
 	return ages,ms
@@ -2110,10 +2171,10 @@ def dev_analyses(matrix='fc',task='nback'):
 			ages = nb_ages
 			for i in range(ms.shape[0]):
 				ms[i] = np.nanmean([nb_ms[i],rs_ms[i]],axis=0)
-		if task == 'restingstate': 
+		if task == 'restingstate':
 			df['motion'] = df['restRelMeanRMSMotion'].values
 			ages,ms = dev_matrices(subjects,'restingstate',distance)
-		if task == 'nback': 
+		if task == 'nback':
 			df['motion'] = df['nbackRelMeanRMSMotion'].values
 			ages,ms = dev_matrices(subjects,'nback',distance)
 		if task == 'both': df['motion'] = np.nanmean([df['nbackRelMeanRMSMotion'].values,df['restRelMeanRMSMotion'].values],axis=0)
@@ -2137,22 +2198,22 @@ def dev_analyses(matrix='fc',task='nback'):
 		age_fits.append(nan_pearsonr(ms[i][:200,:200].flatten(),final_matrix.flatten())[0])
 
 	colors = np.array(sns.husl_palette(6, s=.45))
-	# if matrix == 'sc': 
+	# if matrix == 'sc':
 	# 	new_colors = colors.copy()
 	# 	new_colors[4] = colors[3]
 	# 	new_colors[3] = colors[4]
 	# 	colors = new_colors
-	if matrix == 'fc': 
+	if matrix == 'fc':
 		c = sns.cubehelix_palette(10, rot=.25, light=.7)[0]
 		matrix_name = 'functional'
-	else: 
+	else:
 		c = sns.cubehelix_palette(10, rot=-.25, light=.7)[0]
 		matrix_name = 'structural'
 
 	# #how does fit relate to age?
 	model_vars = np.array([df['motion'].values]).transpose()
 	age_fits_r = sm.GLM(age_fits,sm.add_constant(model_vars)).fit().resid_response
-	#how does age relate to fit?	
+	#how does age relate to fit?
 	fit_df = pd.DataFrame()
 	fit_df['fit'] = age_fits_r
 	fit_df['age'] = np.array(ages)/12.
@@ -2170,7 +2231,7 @@ def dev_analyses(matrix='fc',task='nback'):
 	sns.plt.close()
 
 
-	#how does fit relate to executive function?	
+	#how does fit relate to executive function?
 	model_vars = np.array([ages,df['motion'].values]).transpose()
 	age_fits_r = sm.GLM(age_fits,sm.add_constant(model_vars)).fit().resid_response
 	y = df['F1_Exec_Comp_Res_Accuracy']
@@ -2302,12 +2363,12 @@ def get_subjects(done=False):
 	if done == 'matrices':
 		for i,s in enumerate(subjects):
 			if os.path.exists('/home/mbmbertolero/gene_expression/data/matrices/%s_fc_matrix.npy' %(s)) == False \
-			or os.path.exists('/home/mbmbertolero/gene_expression/data/matrices/%s_sc_matrix.npy' %(s)) == False: 
+			or os.path.exists('/home/mbmbertolero/gene_expression/data/matrices/%s_sc_matrix.npy' %(s)) == False:
 				subjects = np.delete(subjects,np.where(subjects == s))
 	if done == 'graphs':
 		for i,s in enumerate(subjects):
 			if os.path.exists('/home/mbmbertolero/gene_expression/data/results/%s_fc_mods.npy' %(s)) == False \
-			or os.path.exists('/home/mbmbertolero/gene_expression/data/results/%s_sc_mods.npy' %(s)) == False: 
+			or os.path.exists('/home/mbmbertolero/gene_expression/data/results/%s_sc_mods.npy' %(s)) == False:
 				subjects = np.delete(subjects,np.where(subjects == s))
 	return subjects
 
@@ -2336,7 +2397,7 @@ def graph_metrics(subject,matrix):
 				return
 			m = np.nanmean(m,axis=0)
 			m = np.tril(m,-1) + np.tril(m,-1).transpose()
-		else: 
+		if matrix == 'sc':
 			m = np.load('/home/mbmbertolero/data/gene_expression/sc_matrices/%s_matrix.npy'%(subject))
 			m = m + m.transpose()
 			m = np.tril(m,-1) + np.tril(m,-1).transpose()
@@ -2397,9 +2458,9 @@ def super_edge_predict(t):
 		for s in range(subject_pcs.shape[0]):
 			m = matrices[s]
 			flat_matrices[s] = m[np.tril_indices(264,-1)]
-		
+
 		rest_perf_edge_corr = generate_correlation_map(task_perf[fit_mask].values.reshape(1,-1),flat_matrices[fit_mask].transpose())[0]
-		
+
 		rest_perf_edge_scores = np.zeros((subject_pcs.shape[0]))
 		for s in range(subject_pcs.shape[0]):
 			rest_perf_edge_scores[s] = pearsonr(flat_matrices[s],rest_perf_edge_corr)[0]
@@ -2421,7 +2482,7 @@ def super_edge_predict(t):
 	else: pvals = np.array([rest_pc,rest_wmd,subject_mods]).transpose()
 	# pvals = np.array([rest_pc,rest_wmd,subject_mods]).transpose()
 	# neurons = (3,3)
-		
+
 	train = np.ones(len(pvals)).astype(bool)
 	train[t] = False
 	model = Ridge(alpha=1.0)
@@ -2465,7 +2526,7 @@ def super_edge_predict_new(t):
 	else: pvals = np.array([rest_pc,rest_wmd,subject_mods]).transpose()
 	# pvals = np.array([rest_pc,rest_wmd,subject_mods]).transpose()
 	neurons = (4,6,4,6)
-		
+
 	train = np.ones(len(pvals)).astype(bool)
 	train[t] = False
 	# model = Ridge(alpha=1.0)
@@ -2478,7 +2539,7 @@ def super_edge_predict_new(t):
 def task_performance(subjects,task):
 	df = pd.read_csv('//home/mbmbertolero//S900_Release_Subjects_Demographics.csv')
 	performance = []
-	if task == 'WM': 
+	if task == 'WM':
 		wm_df = pd.DataFrame(np.array([df.Subject.values,df['WM_Task_Acc'].values]).transpose(),columns=['Subject','ACC']).dropna()
 		for subject in subjects:
 			temp_df = wm_df[wm_df.Subject==subject]
@@ -2490,7 +2551,7 @@ def task_performance(subjects,task):
 		for subject in subjects:
 			try:performance.append(df['Relational_Task_Acc'][df.Subject == subject].values[0])
 			except: performance.append(np.nan)
-	if task == 'LANGUAGE': 
+	if task == 'LANGUAGE':
 		for subject in subjects:
 			try:performance.append(np.nanmean([df['Language_Task_Story_Avg_Difficulty_Level'][df.Subject == subject].values[0],df['Language_Task_Math_Avg_Difficulty_Level'][df.Subject == subject].values[0]]))
 			except: performance.append(np.nan)
@@ -2515,7 +2576,7 @@ def behavior(subjects,all_b=False):
 	task_perf['Subject'] =df.Subject.values
 
 	fin = pd.merge(task_perf,df,how='outer',on='Subject')
-	
+
 	if all_b == True:
 		to_keep = ['MMSE_Score','PicSeq_AgeAdj','CardSort_AgeAdj','Flanker_AgeAdj','PMAT24_A_CR',\
 		'ReadEng_AgeAdj','PicVocab_AgeAdj','ProcSpeed_AgeAdj','DDisc_AUC_40K','DDisc_AUC_200',\
@@ -2561,7 +2622,7 @@ def behavior(subjects,all_b=False):
 	fin = fin.drop('Delay Discounting: $40,000',axis=1)
 	fin['Sustained Attention'] = np.mean([fin['Sustained Attention Specificity'],fin['Sustained Attention Sensativity']],axis=0)
 	fin = fin.drop('Sustained Attention Specificity',axis=1)
-	fin = fin.drop('Sustained Attention Sensativity',axis=1)	
+	fin = fin.drop('Sustained Attention Sensativity',axis=1)
 	return fin
 
 def adult_fit_analysis(matrix='fc',distance=True):
@@ -2615,12 +2676,12 @@ def make_heatmap(data,cmap="RdBu_r",dmin=None,dmax=None):
 	maxflag = False
 	orig_colors = sns.color_palette(cmap,n_colors=1001)
 	norm_data = np.array(copy.copy(data))
-	if dmin != None: 
+	if dmin != None:
 		if dmin > np.min(norm_data):norm_data[norm_data<dmin]=dmin
-		else: 
+		else:
 			norm_data=np.append(norm_data,dmin)
 			minflag = True
-	if dmax != None: 
+	if dmax != None:
 		if dmax < np.max(norm_data):norm_data[norm_data>dmax]=dmax
 		else:
 			norm_data=np.append(norm_data,dmax)
@@ -2712,7 +2773,7 @@ def plot_which_edges(all_b=False):
 	sns.plt.xlabel('')
 	sns.plt.tight_layout()
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/which_edges_fit_and_predict_similarity_%s_violin.pdf'%(all_b))
-	
+
 	sns.plt.show()
 	# 1/0
 
@@ -2728,7 +2789,7 @@ def plot_which_edges(all_b=False):
 		p_vals = similarity_df[similarity_df.comparison==connectivity]['p'].values[np.argsort(similarity_df[similarity_df.comparison==connectivity]['r'].values)]
 		p_vals = fdrcorrection(p_vals,0.05)[1]
 		for ix,o in enumerate(order):
-			if float(scores[ix]) < 0.0: 
+			if float(scores[ix]) < 0.0:
 				s = '-' + str(scores[ix])[1:5]
 				order[ix] = order[ix] + ' (%s)'%(s)
 				order[ix] = order[ix].capitalize()
@@ -2752,7 +2813,7 @@ def plot_which_edges(all_b=False):
 	behavior_df['r'] = behavior_df['r'].values.astype(float)
 	behavior_df['p'] = behavior_df['p'].values.astype(float)
 	behavior_df['colors'] = make_heatmap(behavior_df['r'].values,'coolwarm',-.3,.3)
-	
+
 	# left, width = 0, 1
 	# bottom, height = 0, 1
 	right = left + width
@@ -2764,7 +2825,7 @@ def plot_which_edges(all_b=False):
 		p_vals = behavior_df[behavior_df.Connectivity==connectivity]['p'].values[np.argsort(behavior_df[behavior_df.Connectivity==connectivity]['r'].values)]
 		p_vals = fdrcorrection(p_vals,0.05)[1]
 		for ix,o in enumerate(order):
-			if float(scores[ix]) < 0.0: 
+			if float(scores[ix]) < 0.0:
 				s = '-' + str(scores[ix])[1:5]
 				order[ix] = order[ix] + ' (%s)'%(s)
 				order[ix] = order[ix].capitalize()
@@ -2808,7 +2869,7 @@ def performance(matrix='fc',task='Working Memory',version='new'):
 	"""
 	prediction / cross validation
 	"""
-	if version == 'new': 
+	if version == 'new':
 		nodal_prediction = []
 		for i in range(len(task_perf)): nodal_prediction.append(super_edge_predict_new(i))
 	# if version == 'old': nodal_prediction = pool.map(super_edge_predict,range(len(task_perf)))
@@ -2816,7 +2877,6 @@ def performance(matrix='fc',task='Working Memory',version='new'):
 	# del pool
 	result = pearsonr(np.array(nodal_prediction).reshape(-1),task_perf)
 	print 'Prediction of Performance: ', result
-	# return result
 
 def print_performance(matrix='fc',version='old',use_matrix = True):
 	subjects = get_subjects(done='graphs')
@@ -2876,7 +2936,7 @@ def plot_perfomance(all_b=True):
 		# p_vals = p_vals * float(len(b.columns))
 		p_vals = fdrcorrection(p_vals,0.05)[1]
 		for ix,o in enumerate(order):
-			if float(scores[ix]) < 0.0: 
+			if float(scores[ix]) < 0.0:
 				s = '-' + str(scores[ix])[1:5]
 				order[ix] = order[ix] + ' (%s)'%(s)
 				order[ix] = order[ix].capitalize()
@@ -2903,7 +2963,7 @@ def con_variance(matrix):
 	done_subjects = get_subjects(done='matrices')
 	subjects = []
 	for s in df.Subject:
-		# if df['ZygositySR'][df.Subject==s].values[0] == 'NotTwin': 
+		# if df['ZygositySR'][df.Subject==s].values[0] == 'NotTwin':
 		if s in done_subjects:
 			subjects.append(s)
 	matrices = []
@@ -2949,7 +3009,7 @@ def heritability(matrix):
 		matrices.append(m[np.triu_indices(400,1)])
 	matrices = np.array(matrices).transpose()
 	ACEfit_Par = {}
-	
+
 	w_df = df[['Subject','Mother_ID','Father_ID','ZygositySR']].astype(str)
 	w_df.to_csv('/home/mbmbertolero/data/gene_expression/twin_data_%s.csv'%(matrix),header=True,index=False)
 	dm = df[['Gender']]
@@ -2995,7 +3055,7 @@ def heritability(matrix):
 	ACEfit_Par['AggNlz']  = 1  #de-meaning and scaling to have stdev of 1.0
 	eng.AgHe_Method(ACEfit_Par,Palpha,Balpha,'_Norm',nargout=0)
 
-def analyze_heritability():	
+def analyze_heritability():
 	homedir = '/home/mbmbertolero/'
 	# homedir = '/Users/maxwell/upenn'
 	sns.set(context="notebook",font='Helvetica',style='white',palette="pastel")
@@ -3017,7 +3077,7 @@ def analyze_heritability():
 	np.fill_diagonal(fc_var,np.nan)
 	sc_var = np.load('/%s/gene_expression/%s_var.npy'%(homedir,'sc'))[:200,:200]
 	np.fill_diagonal(sc_var,np.nan)
-	
+
 	fpc = np.load('/%s/gene_expression/results/fc_pc.npy'%(homedir))[:200]
 	spc = np.load('/%s/gene_expression/results/sc_pc.npy'%(homedir))[:200]
 
@@ -3045,7 +3105,7 @@ def analyze_heritability():
 	print 'fit, con', nan_pearsonr(sdf.groupby('node').mean().fit,np.nanmean(sc_var,axis=0)[mask])
 	print 'pc, con', nan_pearsonr(spc,np.nanmean(sc_var,axis=0))
 	print 'herit, nodes, con', nan_pearsonr(sm_nodes,np.nanmean(sc_var,axis=0))
-	
+
 	fmodel_vars = np.array([fdf.groupby('node').max().fit]).transpose()
 	fpc_r = sm.GLM(fpc[:200][mask],sm.add_constant(fmodel_vars)).fit().resid_response
 	print pearsonr(fm_nodes[mask],fpc_r)
@@ -3056,7 +3116,7 @@ def analyze_heritability():
 	names[:len(sm)] = 'structural'
 	names[len(sm):] = 'functional'
 	df['connectivity'] = names
-	
+
 	colors = sns.color_palette('mako',6)
 
 	fc_c = sns.cubehelix_palette(10, rot=.25, light=.7)[0]
@@ -3158,7 +3218,7 @@ def sge(run_type,matrix,n_genes=100):
 		for node in range(400):
 			os.system('qsub -binding linear:4 -pe unihost 4 -N fg_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/\
 			 /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r find_genes -m %s -n %s -n_genes %s'%(node,matrix,node,n_genes))
-	
+
 	if run_type == 'predict':
 		subjects = get_subjects(done='graphs')
 		df = behavior(subjects,all_b=True)
@@ -3167,7 +3227,7 @@ def sge(run_type,matrix,n_genes=100):
 			# os.system('qsub -q all.q,basic.q -binding linear:8 -pe unihost 8 -N predict -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/\
 			os.system('qsub -q all.q,basic.q -l h_vmem=6G,s_vmem=6G -N predict -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/\
 			 /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r predict -task %s '%(i))
-	
+
 	if run_type == 'predict_role':
 		os.system('qsub -q all.q,basic.q -binding linear:8 -pe unihost 8 -N pred_role -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/\
 		 /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r predict_role -m %s' %(matrix))
@@ -3178,13 +3238,13 @@ def run_all(matrix,topological,distance,network):
 
 def get_paris_df():
 	names = np.array(['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default'])
-	
+
 	fc_df = pd.DataFrame(columns=['Gene','RNMI.symmetric.MEAN','network','connectivity'])
 	fc_files = glob.glob('/home/mbmbertolero/gene_expression/paris/*fc_paris_comm*')
-	
+
 	sc_df = pd.DataFrame(columns=['Gene','RNMI.symmetric.MEAN','network','connectivity'])
 	sc_files = glob.glob('/home/mbmbertolero/gene_expression/paris/*sc_paris_comm*')
-	
+
 	size = (len(fc_files),pd.read_csv(fc_files[0]).shape[0])
 	for i in range(size[0]):
 		t_df= pd.read_csv(fc_files[i],sep='\t').sort_values('Gene')
@@ -3237,7 +3297,7 @@ def paris(matrix,n=15):
 	else: c = c2
 	names = np.array(['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default'])
 
-	
+
 	sc_genes = pd.read_csv(glob.glob('/home/mbmbertolero/gene_expression/paris/*sc_paris_comm*')[0],sep='\t').sort_values('Gene')['Gene'].values
 	fc_genes = pd.read_csv(glob.glob('/home/mbmbertolero/gene_expression/paris/*fc_paris_comm*')[0],sep='\t').sort_values('Gene')['Gene'].values
 	gene_mask = np.zeros((sc_genes.shape))
@@ -3316,8 +3376,8 @@ def paris(matrix,n=15):
 	# max_ranks = np.argmax(m_ranks,axis=0)
 	# max_nmi = np.argmax(m,axis=0)
 	# rank_nmi_heatmap = np.zeros((7,7))
-	
-	
+
+
 
 	# for i in range(size[1]):
 	# 	rank_nmi_heatmap[max_ranks[i],max_nmi[i]] = rank_nmi_heatmap[max_ranks[i],max_nmi[i]] + 1
@@ -3350,17 +3410,20 @@ mask[ignore_nodes] = False
 def sge_perm_n_genes():
 	run_type = 'find_genes'
 	for corr_method in ['spearmanr','pearsonr']:
-		for n_genes in [15,25,35,50,75,100,125,150,175,200]:
+		# for n_genes in [15,25,35,50,75,100,125,150,175,200]:
+		for n_genes in [50,100,200]:
 			for matrix in ['fc','sc']:
 				for use_prs in [False]:
 					for norm in [True]:
 						for node in range(200):
 							if node in ignore_nodes:continue
-							if len(np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,False,True,node,n_genes,False,True,corr_method))) > 0:
-								continue
+							# if len(np.load('/home/mbmbertolero/data/gene_expression/final_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,False,True,node,n_genes,False,True,corr_method))) > 0:
+							# 	continue
 							# else: print node
-							os.system('qsub -q all.q,basic.q -N fg_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/\
-							 /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r find_genes -m %s -n %s -n_genes %s -corr_method %s -norm %s -use_prs %s'%(node,matrix,node,n_genes,corr_method,norm,use_prs))
+							# print '/home/mbmbertolero/gene_expression/gene_expression_analysis.py -r find_genes -m %s -n %s -n_genes %s -corr_method %s -norm %s -use_prs %s'%(matrix,node,n_genes,corr_method,norm,use_prs)
+							# 1/0
+							os.system('qsub -q basic.q -N fg_%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ python /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r find_genes -m %s -n %s -n_genes %s -corr_method %s -norm %s -use_prs %s'%(node,matrix,node,n_genes,corr_method,norm,use_prs))
+
 def sge_random():
 	for corr_method in ['pearsonr']:
 		for n_genes in [15,25,35,50,75,100,125,150,175,200]:
@@ -3379,6 +3442,84 @@ def sge_random():
 							 -r random -m %s -n %s -n_genes %s -corr_method %s -norm %s -use_prs %s'\
 							 %(node,matrix,node,n_genes,corr_method,norm,use_prs))
 
+def gwas(node,matrix='fc'):
+	(bim, fam, G) = read_plink('/home/mbmbertolero/ncbi/dbGaP-18176/matrix/MEGA_Chip')
+	fam.iid = fam.iid.astype('int64')
+	df = pd.read_csv('//home/mbmbertolero/hcp/S1200.csv')
+	df = df.rename(index=str, columns={"Subject": "iid"})
+	df = pd.merge(df,fam,on=['iid'],how='inner')
+	fam = fam.drop('i',axis=1).drop('father',axis=1).drop('mother',axis=1).drop('gender',axis=1).drop('trait',axis=1)
+
+	matrices = []
+	for s in df.iid.values:
+		try:matrices.append(np.load('/home/mbmbertolero/gene_expression/data/matrices/%s_%s_matrix.npy'%(s,matrix))[node])
+		except:
+			m = np.zeros((400))
+			m[:] = -9
+			matrices.append(m)
+	matrices = np.array(matrices).transpose()
+	matrices[np.isnan(matrices)] = -9
+	matrices[node] = -9
+	for n in range(400):
+		fam[str(n)] = matrices[n]
+
+	pheno_fn = "/home/mbmbertolero/gene_expression/data/%s_phenotype.txt"%(node)
+
+	fam.to_csv(pheno_fn,sep=' ',header=None,index=False)
+	command = '/home/mbmbertolero/data/plink-1.07-x86_64/./plink --noweb --bfile /home/mbmbertolero/ncbi/dbGaP-18176/matrix2/MEGA_Chip --pheno %s --linear --all-pheno --out /home/mbmbertolero/gene_expression/results/snp_%s_%s'%(pheno_fn,node,matrix)
+	os.system(command)
+	sys.exit()
+
+def snp2genes():
+	try: bim = pd.read_csv('/home/mbmbertolero/gene_expression/snp2gene.csv')
+	except:
+		mapping = pd.DataFrame(columns=['snp','gene'])
+		our_genes = get_genes()
+		genes = pd.read_csv('/home/mbmbertolero/ncbi/glist-hg19',sep=' ',header=None)
+		genes['mean pos'] = np.nanmean([genes[1],genes[2]],axis=0)
+		(bim, fam, G) = read_plink('/home/mbmbertolero/ncbi/dbGaP-18176/matrix/MEGA_Chip')
+
+		closest = []
+		for snp,pos in zip(bim.snp.values,bim.pos.values):
+			closest.append(genes[3][np.argmin(abs(genes['mean pos'].values-pos))])
+		bim['closest'] = closest
+
+		bim = bim.drop('pos',axis=1).drop('cm',axis=1).drop('a0',axis=1).drop('a1',axis=1).drop('i',axis=1)
+		bim.to_csv('/home/mbmbertolero/gene_expression/snp2gene.csv',index=False)
+	return bim
+
+def gwas_sge():
+	# for matrix in ['fc','sc']:
+	for matrix in ['fc']:
+		for node in range(400):
+			os.system("qsub -q all.q,basic.q -l h_vmem=4G,s_vmem=4G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/\
+	 		-e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r gwas -m %s -node %s"%(node,matrix,node))
+
+def snp2expression_analysis(n_genes=200,matrx='fc'):
+	distance = True
+	use_prs = False
+	norm = True
+	corr_method = 'pearsonr'
+	gene_names = get_genes()
+	snp2genes_df = snp2genes()
+	snp2genes_df.rename(columns={'snp': 'SNP'}, inplace=True)
+	for node in range(200):
+		if node in ignore_nodes: continue
+		fit_gene_t = np.array([])
+		non_fit_gene_t = np.array([])
+		for edge in range(200):
+			nodes_genes = gene_names[np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,False,distance,node,n_genes,use_prs,norm,corr_method))[-1]]
+			snp_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/snp_%s_%s.assoc.linear'%(node,matrix),header=0,sep='\s+')
+			result_df = pd.merge(snp_df,snp2genes_df,on='SNP',how='left')
+			for gene in nodes_genes:
+				fit_gene_t = np.append(fit_gene_t,np.array(result_df['STAT'][result_df[result_df.closest==gene].index]))
+				non_fit_gene_t = np.append(fit_gene_t,np.array(result_df['STAT'][result_df[result_df.closest!=gene].index]))
+				fit_gene_t = fit_gene_t[np.isnan(fit_gene_t) == False]
+				non_fit_gene_t = non_fit_gene_t[np.isnan(non_fit_gene_t) == False]
+				print scipy.stats.ttest_ind(abs(fit_gene_t),abs(non_fit_gene_t))
+
+
+
 	# run_type = 'find_genes'
 	# for matrix in ['fc']:
 	# 	for n_genes in [100]:
@@ -3396,7 +3537,7 @@ def sge_random():
 # os.system('rm -f -r /home/mbmbertolero/gene_expression/norm_results')
 # os.system('mkdir /home/mbmbertolero/gene_expression/norm_results')
 
-	
+
 # make_fit_df('fc',use_prs=False,norm=True,corr_method='pearsonr')
 # make_fit_df('sc',use_prs=False,norm=True,corr_method='pearsonr')
 # make_fit_df('fc',use_prs=False,norm=True,corr_method='spearmanr')
@@ -3421,15 +3562,20 @@ def sge_random():
 
 if run_type == 'find_genes': SA_find_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,start_temp=.5,end_temp=.01,temp_step=.01,n_trys=1000,cores=0,use_prs=use_prs)
 if run_type == 'predict_role': role_prediction(matrix,'genetic',distance=True,topological=False)
-if run_type == 'graph_metrics': 
-	graph_metrics(subject,'sc')
-	graph_metrics(subject,'fc')
+if run_type == 'graph_metrics':
+	avg_graph_metrics('fc',topological=False,distance=True)
+	avg_graph_metrics('sc',topological=False,distance=True)
+	avg_graph_metrics('fc',topological=False,distance=False)
+	avg_graph_metrics('sc',topological=False,distance=False)
+	# graph_metrics(subject,'sc')
+	# graph_metrics(subject,'fc')
 if run_type == 'predict':
 	subjects = get_subjects(done='graphs')
 	df = behavior(subjects,all_b=True)
 	task = df.columns.values[int(task)]
 	performance('fc',task)
 	performance('sc',task)
+if run_type == 'gwas': gwas(node,matrix)
 if run_type == 'random': null_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=10000,corr_method = 'pearsonr')
 if run_type == 'random_random': random_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=1000,corr_method = 'pearsonr')
 
