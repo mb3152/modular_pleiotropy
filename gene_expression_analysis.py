@@ -3492,7 +3492,23 @@ def sge_random():
 							 -r random -m %s -n %s -n_genes %s -corr_method %s -norm %s -use_prs %s'\
 							 %(node,matrix,node,n_genes,corr_method,norm,use_prs))
 
-def gwas(node,matrix='fc',components='edges'):
+def filter_snps():
+
+	"""
+	Identification of individuals with elevated missing data rates or outlying heterozygosity rate
+	"""
+
+	c = '/home/mbmbertolero/data/plink-1.07-x86_64/./plink --bfile /home/mbmbertolero/ncbi/dbGaP-18176/matrix2/MEGA_Chip --missing \
+	--out /home/mbmbertolero/gene_expression/snp_results/raw-GWA-data'
+	os.system(c)
+	
+	c = '/home/mbmbertolero/data/plink-1.07-x86_64/./plink --bfile /home/mbmbertolero/ncbi/dbGaP-18176/matrix2/MEGA_Chip --het --out raw-GWA-data'
+	os.system(c)
+
+	c = 'R CMD BATCH imiss-vs-het.Rscript'
+	os.system('command')
+
+def prep_gwas(node,matrix='fc',components='edges'):
 	(bim, fam, G) = read_plink('/home/mbmbertolero/ncbi/dbGaP-18176/matrix/MEGA_Chip')
 	fam.iid = fam.iid.astype('int64')
 	df = pd.read_csv('//home/mbmbertolero/hcp/S1200.csv')
@@ -3518,22 +3534,22 @@ def gwas(node,matrix='fc',components='edges'):
 			fam[str(n)] = pheno
 
 	if components == 'edges':
-		matrices = []
-		for s in df.iid.values:
+		matrices = np.zeros((len(df.iid.values),400,400))
+		for sidx,s in enumerate(df.iid.values):
 			try: 
 				m = np.load('/home/mbmbertolero/gene_expression/data/matrices/%s_%s_matrix.npy'%(s,matrix))
 				np.fill_diagonal(m,np.nan)
 			except:
 				m = np.zeros((400,400))
 				m[:] = np.nan
-			matrices.append(m)
-		matrices = np.array(matrices)
+			matrices[sidx] = m
 		mean = np.nanmean(matrices,axis=0)
 		mean = brain_graphs.threshold(mean,0.05,mst=True)
 		real_edges = np.argwhere(mean[node]>0)
 		matrices[np.isnan(matrices)] = -9
 		for n in real_edges:
 			fam[str(n)] = matrices[:,node,n]
+
 
 	if components == 2:
 		fam['pc'] = -9.
@@ -3544,16 +3560,9 @@ def gwas(node,matrix='fc',components='edges'):
 				fam['wcs'][sidx] = np.load('/home/mbmbertolero/gene_expression/data//results/%s_%s_wmds.npy' %(subject,matrix))[node]
 			except:
 				continue
-
-	if components == 'edges': 
-		eiter = len(real_edges)
-	if components == 2 or components == 7 or components == 17: eiter = components
-	pheno_fn = "/home/mbmbertolero/gene_expression/data/%s_phenotype.txt"%(node)
-	# os.system('ln %s %s'%(tmpdir.split('\n')[0],out))
+	
+	pheno_fn = "/home/mbmbertolero/gene_expression/snp_results/%s_%s_phenotype.txt"%(node,matrix)
 	fam.to_csv(pheno_fn,sep=' ',header=None,index=False)
-	command = '/home/mbmbertolero/data/plink-1.07-x86_64/./plink --noweb --bfile /home/mbmbertolero/ncbi/dbGaP-18176/matrix2/MEGA_Chip --pheno %s --linear --all-pheno --out /home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s'%(pheno_fn,components,node,matrix)
-	os.system(command)
-	sys.exit()
 
 def snp_2_gene_idx():
 	try:
@@ -3577,9 +3586,9 @@ def snp_2_gene_idx():
 def csv_to_npy(node,matrix='fc',components='edges'):
 	print node
 	if components == 'edges': 
-		eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))
+		# eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))
+		eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))-1
 	if components == 2 or components == 7 or components == 17: eiter = components
-	if node in [154,155,174,175,180]: eiter = eiter -1
 	for edge in range(eiter):
 		print edge
 		if edge == 0: 
@@ -3628,13 +3637,20 @@ def snp2genes():
 		bim.to_csv('/home/mbmbertolero/gene_expression/snp2gene.csv',index=False)
 	return bim
 
-def gwas_sge():
+def gwas_sge(runtype='prep'):
 	# for matrix in ['fc','sc']:
 	os.system('cp /home/mbmbertolero/gene_expression/gene_expression_analysis.py /home/mbmbertolero/gene_expression/gene_expression_analysis_sge.py')
+	# for matrix in ['fc','sc']:
 	for matrix in ['sc']:
 		for node in range(200):
-			# os.system("qsub -q all.q,basic.q -l h_vmem=6G,s_vmem=6G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis_sge.py -r gwas -m %s -node %s"%(node,matrix,node))
-			os.system("qsub -q all.q,basic.q -l h_vmem=4G,s_vmem=4G -N ag%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r collapse -m %s -node %s"%(node,matrix,node))
+			if runtype =='prep': 
+				os.system("qsub -q all.q,basic.q -l h_vmem=6G,s_vmem=6G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis_sge.py -r pgwas -m %s -node %s"%(node,matrix,node))
+			if runtype =='run':
+				pheno_fn = "/home/mbmbertolero/gene_expression/snp_results/%s_%s_phenotype.txt"%(node,matrix)
+				command = '/home/mbmbertolero/data/plink-1.07-x86_64/./plink --noweb --bfile /home/mbmbertolero/ncbi/dbGaP-18176/matrix2/MEGA_Chip --nonfounders --maf 0.01 --geno 0.05 --hwe 0.00001 --pheno %s --linear --all-pheno --out /home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s'%(pheno_fn,components,node,matrix)
+				os.system("qsub -q all.q,basic.q,himem.q -l h_vmem=3G,s_vmem=3G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ %s"%(node,command))
+			if runtype == 'mean':
+				os.system("qsub -q all.q,basic.q -l h_vmem=2G,s_vmem=2G -N ag%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r collapse -m %s -node %s"%(node,matrix,node))
 
 def snp2expression_analysis(node,matrix='fc',components=7,distance=True,use_prs=False,norm=True,corr_method='pearsonr'):
 	global nodes_genes
@@ -3660,12 +3676,13 @@ def snp2expression_analysis(node,matrix='fc',components=7,distance=True,use_prs=
 	np.save('/home/mbmbertolero/data/gene_expression/snp_results/%s_%s_%s_gene_snps_mean'%(components,node,matrix),snp_by_gene)
 
 def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = False,norm=True,corr_method = 'pearsonr'):
+	n_nodes = 192
 	gene_names = get_genes()
-	node_by_snp = np.zeros((200,len(gene_names)))
+	node_by_snp = np.zeros((n_nodes,len(gene_names)))
 	node_by_snp[:,:] = np.nan
-	node_by_fit = np.zeros((200,len(gene_names))).astype(bool)
+	node_by_fit = np.zeros((n_nodes,len(gene_names))).astype(bool)
 	
-	for node in range(200):
+	for node in range(n_nodes):
 		try:
 			node_by_snp[node] = np.load('/home/mbmbertolero/data/gene_expression/snp_results/%s_%s_%s_gene_snps_mean.npy'%(components,node,matrix))
 			for n_genes in [15,25,35,50,75,100,125,150,175,200]:
@@ -3681,7 +3698,7 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 	y = node_by_snp[:,top_fits==False].flatten()
 	x = x[np.isnan(x) == False]
 	y = y[np.isnan(y) == False]
-	scipy.stats.ttest_ind(x,y)
+	print scipy.stats.ttest_ind(x,y)
 
 
 	mean_snp = np.nanmean(node_by_snp,axis=1)
@@ -3694,12 +3711,17 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 	fit_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/%s_True_%s_False_fits_df.csv'%(matrix,corr_method))
 	for task in b.columns.values:
 		fc_corrs = np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_corrs.npy'%(task,matrix))
-		fc_r = nan_pearsonr(np.nanmean(fc_corrs.reshape((400,400)),axis=0)[:200],mean_snp)
-		fit_r = nan_pearsonr(np.nanmean(fc_corrs.reshape((400,400)),axis=0)[:200][mask],fit_df.groupby('node').fit.mean())
+		fc_r = nan_pearsonr(np.nanmean(fc_corrs.reshape((400,400)),axis=0)[:n_nodes],mean_snp)
+		fit = np.zeros(200)
+		fit[:] = np.nan
+		fit[mask] = fit_df.groupby('node').fit.mean()
+		fit = fit[:n_nodes]
+		fit_r = nan_pearsonr(np.nanmean(fc_corrs.reshape((400,400)),axis=0)[:n_nodes],fit)
 		behavior_df = behavior_df.append(pd.DataFrame(np.array([['functional'],[fc_r[0]],[fit_r[0]],[task]]).transpose(),columns=columns))
 	behavior_df.snp_r = behavior_df.snp_r.values.astype(float)
 	behavior_df.fit_r = behavior_df.fit_r.values.astype(float)
 
+	print pearsonr(behavior_df.snp_r,behavior_df.fit_r)
 	#for any given task, the amount that nodes' predictions were related to fits of snps was related.
 
 	matrix = 'fc'
@@ -3748,25 +3770,6 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 	max_v,min_v = (np.std(vals)*1) + np.mean(vals), np.mean(vals) - (np.std(vals)*1)
 	write_cifti(atlas_path,'snps',make_heatmap(np.array([vals,vals]).flatten(),dmin=min_v,dmax=max_v))
 
-def mean_snp():
-	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
-	node_ts = np.zeros((200))
-	fit_gene = np.zeros((200),dtype='int16')
-	non_fit_gene = np.zeros((200),dtype='int16')
-	for node in range(200):
-		if os.path.exists('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_snps_f.npy'%(components,node,matrix,n_genes)) == False:
-			print node
-			continue
-		node_fit_gene = np.abs((np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_snps_f.npy'%(components,node,matrix,n_genes)) * 100).astype('int16'))
-		node_non_fit_gene = np.abs((np.load('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_snps_nf.npy'%(components,node,matrix,n_genes))* 100).astype('int16'))
-		fm = node_fit_gene.mean()
-		nm = node_non_fit_gene.mean()
-		fit_gene[node] = fm
-		non_fit_gene[node] = nm
-		if node in [5,10,25,50,100,150]:
-			print 'all'
-			print scipy.stats.ttest_ind(fit_gene,non_fit_gene)
-
 def connector_gene_figure():
 	r = np.zeros((gene_exp.shape[1]))
 	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
@@ -3800,7 +3803,7 @@ if run_type == 'predict':
 	task = df.columns.values[int(task)]
 	performance('fc',task)
 	performance('sc',task)
-if run_type == 'gwas': gwas(node,matrix,'edges')
+if run_type == 'pgwas': prep_gwas(node,matrix,'edges')
 if run_type == 'random': null_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=10000,corr_method = 'pearsonr')
 if run_type == 'random_random': random_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=1000,corr_method = 'pearsonr')
 if run_type == 'collapse': csv_to_npy(node)
