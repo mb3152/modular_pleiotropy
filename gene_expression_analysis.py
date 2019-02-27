@@ -2209,7 +2209,7 @@ def full_gene_coexpression(matrix,topological,distance,n_genes=50):
 	return final_matrix
 
 def dev_analyses(matrix='fc',task='nback'):
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 	distance = False
 	task ='nback'
 	# get behavioral metrics
@@ -2315,8 +2315,13 @@ def dev_analyses(matrix='fc',task='nback'):
 	neg_changes = changes.copy()
 	neg_changes[neg_changes>0.0] = np.nan
 
+	fc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_fc.npy')
+	sc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_sc.npy')
+
+
 	fc_fit_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/%s_%s_%s_%s_fits_df.csv'%(matrix,True,'pearsonr',False))
 
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
 	ax = sns.regplot(y=fc_fit_df.groupby('node').fit.mean(),x=np.nanmean(np.abs(changes),axis=0)[:200][mask],
 		scatter_kws={'facecolors':colors[5],'edgecolors':colors[5],'alpha':.5},line_kws={'color':colors[5]})
 	sns.plt.ylabel('gene-coexpression fit in adults')
@@ -2328,26 +2333,41 @@ def dev_analyses(matrix='fc',task='nback'):
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/dev_fit_adult_gene_fit_all_%s_%s.pdf'%(matrix,task))
 	sns.plt.close()
 
+	colors = sns.husl_palette(20, s=.45)
 	ax = sns.regplot(y=fc_fit_df.groupby('node').fit.mean(),x=np.nanmean(np.abs(neg_changes),axis=0)[:200][mask],
-		scatter_kws={'facecolors':colors[4],'edgecolors':colors[4],'alpha':.5},line_kws={'color':colors[4]})
-	sns.plt.ylabel('genetic fit in adults')
-	sns.plt.xlabel('nodal developmental decrease\nin %s connectivity'%(matrix_name))
+		scatter_kws={'facecolors':colors[14],'edgecolors':colors[14],'alpha':.5},line_kws={'color':colors[14]})
+	ax2 = ax.twinx()
+	sns.regplot(y=np.nanmean(fc_node_by_snp,axis=1),x=np.nanmean(np.abs(neg_changes),axis=0)[:200],
+		scatter_kws={'facecolors':colors[15],'edgecolors':colors[15],'alpha':.5},line_kws={'color':colors[15]},ax=ax2)
+	ax2.set_xlim(0.0325,0.084)
+	ax.set_ylabel('genetic fit in adults',color=colors[14],labelpad=-1)
+	ax2.set_ylabel('genetically explained\nconnectivity variance',rotation=-90,color=colors[15],labelpad=24)
+	ax.set_xlabel('nodal developmental decrease\nin %s connectivity'%(matrix_name))
 	r,p = nan_pearsonr(y=fc_fit_df.groupby('node').fit.mean(),x=np.nanmean(np.abs(neg_changes),axis=0)[:200][mask])
-	sns.plt.text(0.8, 0.2,convert_r_p(r,p), horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
-	sns.despine()
+	sns.plt.text(0.8, 0.2,convert_r_p(r,p),color=colors[14],horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
+	r,p = nan_pearsonr(y=np.nanmean(fc_node_by_snp,axis=1),x=np.nanmean(np.abs(neg_changes),axis=0)[:200])
+	sns.plt.text(0.6, 0.2,convert_r_p(r,p),color=colors[15],horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
+	sns.despine(top=True,right=False)
 	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/dev_fit_adult_gene_fit_neg_%s_%s.pdf'%(matrix,task))
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/dev_fit_adult_gene_fit_neg_%s_%s.pdf'%(matrix,task))
 	sns.plt.close()
 
 	ax = sns.regplot(y=fc_fit_df.groupby('node').fit.mean(),x=np.nanmean(np.abs(pos_changes),axis=0)[:200][mask],
-		scatter_kws={'facecolors':colors[0],'edgecolors':colors[0],'alpha':.5},line_kws={'color':colors[0]})
-	sns.plt.ylabel('genetic fit in adults')
-	sns.plt.xlabel('nodal developmental increase\nin %s connectivity'%(matrix_name))
+		scatter_kws={'facecolors':colors[17],'edgecolors':colors[17],'alpha':.5},line_kws={'color':colors[17]})
+	ax2 = ax.twinx()
+	sns.regplot(y=np.nanmean(fc_node_by_snp,axis=1),x=np.nanmean(np.abs(pos_changes),axis=0)[:200],
+		scatter_kws={'facecolors':colors[19],'edgecolors':colors[19],'alpha':.5},line_kws={'color':colors[19]},ax=ax2)
+	ax2.set_xlim(0.0325,0.084)
+	ax.set_ylabel('genetic fit in adults',color=colors[17],labelpad=-1)
+	ax2.set_ylabel('genetically explained\nconnectivity variance',rotation=-90,color=colors[19],labelpad=24)
+	ax.set_xlabel('nodal developmental increase\nin %s connectivity'%(matrix_name))
 	r,p = nan_pearsonr(y=fc_fit_df.groupby('node').fit.mean(),x=np.nanmean(np.abs(pos_changes),axis=0)[:200][mask])
-	sns.plt.text(0.8, 0.2,convert_r_p(r,p), horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
-	sns.despine()
+	sns.plt.text(0.8, 0.2,convert_r_p(r,p),color=colors[17],horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
+	r,p = nan_pearsonr(y=np.nanmean(fc_node_by_snp,axis=1),x=np.nanmean(np.abs(pos_changes),axis=0)[:200])
+	sns.plt.text(0.6, 0.1,convert_r_p(r,p),color=colors[19],horizontalalignment='center',verticalalignment='center',transform=ax.transAxes)
+	sns.despine(top=True,right=False)
 	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/gene_expression/new_figures/dev_fit_adult_gene_fit_pos_%s_%s.pdf'%(matrix,task))
+	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/dev_fit_adult_gene_fit_pos_%s_%s.pdf'%(matrix,task))
 	sns.plt.close()
 
 	ax=sns.regplot(y=pc,x=np.nanmean(np.abs(pos_changes),axis=0),scatter_kws={'facecolors':colors[0],'edgecolors':colors[0],'alpha':.5},line_kws={'color':colors[0]})
@@ -3112,7 +3132,7 @@ def heritability(matrix):
 def analyze_heritability():
 	homedir = '/home/mbmbertolero/'
 	# homedir = '/Users/maxwell/upenn'
-	sns.set(context="notebook",font='Helvetica',style='white',palette="pastel")
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
 	smatrix = np.zeros((400,400))
 	fmatrix = np.zeros((400,400))
 	sm = scipy.io.loadmat('/%s/gene_expression/heritability/sc/ACEfit_Par.mat'%(homedir))
@@ -3135,6 +3155,8 @@ def analyze_heritability():
 	fpc = np.load('/%s/gene_expression/results/fc_pc.npy'%(homedir))[:200]
 	spc = np.load('/%s/gene_expression/results/sc_pc.npy'%(homedir))[:200]
 
+	fc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_fc.npy')
+	sc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_sc.npy')
 
 	# fdf = pd.read_csv('/%s/gene_expression/results/fc_fits_df.csv'%(homedir))
 	# fdf = fdf[fdf.n_genes==n_genes]
@@ -3586,8 +3608,7 @@ def snp_2_gene_idx():
 def csv_to_npy(node,matrix='fc',components='edges'):
 	print node
 	if components == 'edges': 
-		# eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))
-		eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))-1
+		eiter = len(glob.glob('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P**.assoc.linear'%(components,node,matrix)))
 	if components == 2 or components == 7 or components == 17: eiter = components
 	for edge in range(eiter):
 		print edge
@@ -3598,7 +3619,7 @@ def csv_to_npy(node,matrix='fc',components='edges'):
 			tdf = pd.read_csv('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P%s.assoc.linear'%(components,node,matrix,edge+1),header=0,sep='\s+',memory_map=True,usecols=[1,6],engine='c',low_memory=False)
 			df.BETA = df.BETA.values + abs(tdf.BETA.values)
 			del tdf
-	df.BETA = df.BETA.values / float(eiter+1)
+	df.BETA = df.BETA.values / float(eiter)
 	gene_names = get_genes()
 	snp2genes_df = snp2genes()
 	snp2genes_df.rename(columns={'snp': 'SNP'}, inplace=True)
@@ -3637,11 +3658,10 @@ def snp2genes():
 		bim.to_csv('/home/mbmbertolero/gene_expression/snp2gene.csv',index=False)
 	return bim
 
-def gwas_sge(runtype='prep'):
+def gwas_sge(runtype='mean'):
 	# for matrix in ['fc','sc']:
 	os.system('cp /home/mbmbertolero/gene_expression/gene_expression_analysis.py /home/mbmbertolero/gene_expression/gene_expression_analysis_sge.py')
-	# for matrix in ['fc','sc']:
-	for matrix in ['sc']:
+	for matrix in ['fc','sc']:
 		for node in range(200):
 			if runtype =='prep': 
 				os.system("qsub -q all.q,basic.q -l h_vmem=6G,s_vmem=6G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis_sge.py -r pgwas -m %s -node %s"%(node,matrix,node))
@@ -3651,6 +3671,9 @@ def gwas_sge(runtype='prep'):
 				os.system("qsub -q all.q,basic.q,himem.q -l h_vmem=3G,s_vmem=3G -N gwas%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ %s"%(node,command))
 			if runtype == 'mean':
 				os.system("qsub -q all.q,basic.q -l h_vmem=2G,s_vmem=2G -N ag%s -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r collapse -m %s -node %s"%(node,matrix,node))
+	# 1/0
+	# os.system("qsub -q all.q,basic.q -l h_vmem=10G,s_vmem=10G -N a_fc -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r top -m fc")
+	# os.system("qsub -q all.q,basic.q -l h_vmem=10G,s_vmem=10G -N a_sc -j y -b y -o /home/mbmbertolero/sge/ -e /home/mbmbertolero/sge/ /home/mbmbertolero/gene_expression/gene_expression_analysis.py -r top -m sc")
 
 def snp2expression_analysis(node,matrix='fc',components=7,distance=True,use_prs=False,norm=True,corr_method='pearsonr'):
 	global nodes_genes
@@ -3676,7 +3699,7 @@ def snp2expression_analysis(node,matrix='fc',components=7,distance=True,use_prs=
 	np.save('/home/mbmbertolero/data/gene_expression/snp_results/%s_%s_%s_gene_snps_mean'%(components,node,matrix),snp_by_gene)
 
 def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = False,norm=True,corr_method = 'pearsonr'):
-	n_nodes = 192
+	n_nodes = 200
 	gene_names = get_genes()
 	node_by_snp = np.zeros((n_nodes,len(gene_names)))
 	node_by_snp[:,:] = np.nan
@@ -3691,15 +3714,19 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 
 	num_fits = np.sum(node_by_fit,axis=0)
 	top_fits = np.zeros((len(gene_names))).astype(bool)
-	top_fits[np.where(num_fits>=np.median(num_fits))] = True
-
-
+	top_fits[np.where(num_fits>=np.median(num_fits))[0]] = True
+	# top_fits[np.where(num_fits>=15)] = True
 	x = node_by_snp[:,top_fits==True].flatten()
 	y = node_by_snp[:,top_fits==False].flatten()
 	x = x[np.isnan(x) == False]
 	y = y[np.isnan(y) == False]
 	print scipy.stats.ttest_ind(x,y)
 
+	# 1/0
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/top_fits_%s'%(matrix),top_fits)
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/num_fits_%s'%(matrix),num_fits)
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_%s'%(matrix),node_by_snp)
+	
 
 	mean_snp = np.nanmean(node_by_snp,axis=1)
 	corr_method = 'pearsonr'
@@ -3721,56 +3748,234 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 	behavior_df.snp_r = behavior_df.snp_r.values.astype(float)
 	behavior_df.fit_r = behavior_df.fit_r.values.astype(float)
 
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/behav_fit_r_%s'%(matrix),behavior_df.fit_r.values.astype(float))
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/behav_snp_r_%s'%(matrix),behavior_df.snp_r.values.astype(float))
 	print pearsonr(behavior_df.snp_r,behavior_df.fit_r)
-	#for any given task, the amount that nodes' predictions were related to fits of snps was related.
 
-	matrix = 'fc'
-	use_prs = False
-	norm = True
-	corr_method = 'pearsonr'
-	distance = True
-	topological = False
-	source = 'snps'
-	if source == 'snps':
-		result_dir = 'snp_results'
-	if source == 'sa':
-		result_dir = 'results'
 
-	df = pd.read_csv('/home/mbmbertolero/data/gene_expression/%s/%s_%s_%s_%s_fits_df.csv'%(result_dir,matrix,norm,corr_method,use_prs))
-	sdf = df.groupby('node').mean()
-	sdf['snp'] = np.nanmean(node_by_snp,axis=1)[mask]
-	sdf['network'] = yeo_membership(components=7)[mask]
-	
 	ts = np.zeros((200))
-	null_ts = np.zeros((200,1000))
+	null_ts = np.zeros((200,100))
+
 	for node in range(200):
 		print node
-		try:
-			x = node_by_snp[node,node_by_fit[node]==True]
-			y = node_by_snp[node,node_by_fit[node]==False]
+		x = node_by_snp[node,node_by_fit[node]==True]
+		y = node_by_snp[node,node_by_fit[node]==False]
+		x = x[np.isnan(x) == False]
+		y = y[np.isnan(y) == False]
+		ts[node] = scipy.stats.ttest_ind(x,y)[0]
+		n_genes = len(np.where(node_by_fit[node]==True)[0])
+		for null_run in range(100):
+			random_node_by_fit = np.zeros((len(gene_names))).astype(bool)
+			random_node_by_fit[np.random.choice(len(gene_names),n_genes,replace=False)] = True
+			x = node_by_snp[node,random_node_by_fit==True]
+			y = node_by_snp[node,random_node_by_fit==False]
 			x = x[np.isnan(x) == False]
 			y = y[np.isnan(y) == False]
-			ts[node] = scipy.stats.ttest_ind(x,y)[0]
-			n_genes = len(np.where(node_by_fit[node]==True)[0])
-			for null_run in range(10000):
-				random_node_by_fit = np.zeros((len(gene_names))).astype(bool)
-				random_node_by_fit[np.random.choice(len(gene_names),n_genes,replace=False)] = True
-				x = node_by_snp[node,random_node_by_fit==True]
-				y = node_by_snp[node,random_node_by_fit==False]
-				x = x[np.isnan(x) == False]
-				y = y[np.isnan(y) == False]
-				null_ts[node,null_run] = scipy.stats.ttest_ind(x,y)[0]
-		except: continue
+			null_ts[node,null_run] = scipy.stats.ttest_ind(x,y)[0]
 	print scipy.stats.ttest_ind(ts[np.isnan(ts)==False],null_ts[np.isnan(null_ts)==False])
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/null_ts_%s'%(matrix),null_ts)
+	np.save('/home/mbmbertolero/data/gene_expression/snp_results/ts_%s'%(matrix),ts)
 
+def snp_figure():
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
+	fcpal = sns.cubehelix_palette(10, rot=.25, light=.7)
+	scpal = sns.cubehelix_palette(10, rot=-.25, light=.7)
+	fc_top_fits = np.load('/home/mbmbertolero/data/gene_expression/snp_results/top_fits_fc.npy')
+	sc_top_fits = np.load('/home/mbmbertolero/data/gene_expression/snp_results/top_fits_sc.npy')
+	fc_top_fits_n = np.load('/home/mbmbertolero/data/gene_expression/snp_results/num_fits_fc.npy')
+	sc_top_fits_n = np.load('/home/mbmbertolero/data/gene_expression/snp_results/num_fits_sc.npy')
+	fc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_fc.npy')
+	sc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_sc.npy')
+
+
+	fc_fits = np.zeros((58))
+	n_genes = []
+	for n in range(2,60):
+		top_fits = np.zeros((fc_top_fits.shape[0])).astype(bool)
+		top_fits[np.where(fc_top_fits_n>=n)[0]] = True
+		x,y = fc_node_by_snp[:,top_fits==True].flatten(),fc_node_by_snp[:,top_fits==False].flatten()
+		x = x[np.isnan(x) == False]
+		y = y[np.isnan(y) == False]
+		fc_fits[n-2] = scipy.stats.ttest_ind(x,y)[0]
+		n_genes.append(len(top_fits[top_fits==True]))
+
+
+	from scipy.interpolate import interp1d
+	f = interp1d(range(2,60),fc_fits, kind='cubic')
+	xnew = np.linspace(2,59, num=1000, endpoint=True)
+	fig = sns.scatterplot(range(2,60),fc_fits,color=fcpal[0])
+	sns.plt.plot(xnew,f(xnew),color=fcpal[0])
+	for datapoint in [5,15,25,35,45,45,55]:
+		fig.text(datapoint,fc_fits[datapoint],n_genes[datapoint],{'fontsize':12,'color':fcpal[2]},horizontalalignment='center')
+
+
+	sc_fits = []
+	for n in range(2,sc_top_fits_n.max()):
+		top_fits = np.zeros((sc_top_fits.shape[0])).astype(bool)
+		top_fits[np.where(sc_top_fits_n>=n)[0]] = True
+		x,y = sc_node_by_snp[:,top_fits==True].flatten(),sc_node_by_snp[:,top_fits==False].flatten()
+		x = x[np.isnan(x) == False]
+		y = y[np.isnan(y) == False]
+		sc_fits.append(scipy.stats.ttest_ind(x,y)[0])
+	sc_fits = np.array(sc_fits)
+
+	from scipy.interpolate import interp1d
+	f = interp1d(range(2,31),sc_fits, kind='cubic')
+	xnew = np.linspace(2,30, num=1000, endpoint=True)
+	sns.scatterplot(range(2,31),sc_fits,color=scpal[0])
+	sns.plt.plot(xnew,f(xnew),color=scpal[0])
+	sns.plt.xlabel('number of nodes genes fit')
+	sns.plt.ylabel('t-value, snp betas\nat coexpresson genes\nversus other genes')
+	fig.text(45,-10,'functional',{'fontsize':12,'color':fcpal[0],'fontweight':"bold"},horizontalalignment='center')
+	fig.text(45,-15,'structural',{'fontsize':12,'color':scpal[0],'fontweight':"bold"},horizontalalignment='center')
+	plt.tight_layout()
+	sns.despine()
+	plt.savefig('/home/mbmbertolero/gene_expression/figures/fit_snp_v_others_dist.pdf')
+	plt.show()
+	plt.close()
+
+	fc_nulls = np.load('/home/mbmbertolero/data/gene_expression/snp_results/null_ts_fc.npy')
+	fc_ts = np.load('/home/mbmbertolero/data/gene_expression/snp_results/ts_fc.npy')
+
+	sc_nulls = np.load('/home/mbmbertolero/data/gene_expression/snp_results/null_ts_sc.npy')
+	sc_ts = np.load('/home/mbmbertolero/data/gene_expression/snp_results/ts_sc.npy')
+
+	fc_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/fc_True_pearsonr_False_fits_df.csv')
+	sc_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/sc_True_pearsonr_False_fits_df.csv')
+	fc_df,sc_df = fc_df.groupby('node').mean(),sc_df.groupby('node').mean()
+	fc_df['snp'],sc_df['snp'] = np.nanmean(fc_node_by_snp,axis=1)[mask],np.nanmean(sc_node_by_snp,axis=1)[mask]
+	fc_df['membership'],sc_df['membership'] =yeo_membership(components=7)[mask],yeo_membership(components=7)[mask]
+
+
+	fc_fit_r,sc_fit_r = np.load('/home/mbmbertolero/data/gene_expression/snp_results/behav_fit_r_fc.npy'),np.load('/home/mbmbertolero/data/gene_expression/snp_results/behav_fit_r_sc.npy')
+	fc_snp_r,sc_snp_r = np.load('/home/mbmbertolero/data/gene_expression/snp_results/behav_snp_r_fc.npy'),np.load('/home/mbmbertolero/data/gene_expression/snp_results/behav_snp_r_sc.npy')
+
+
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
+	smatrix = np.zeros((400,400))
+	fmatrix = np.zeros((400,400))
+	sm = scipy.io.loadmat('//home/mbmbertolero//gene_expression/heritability/sc/ACEfit_Par.mat')
+	fm = scipy.io.loadmat('/home/mbmbertolero//gene_expression/heritability/fc/ACEfit_Par.mat')
+	smatrix[np.triu_indices(400,1)] = np.array(sm['ACEfit_Par']['Stats'][0][0]).flatten()
+	fmatrix[np.triu_indices(400,1)] = np.array(fm['ACEfit_Par']['Stats'][0][0]).flatten()
+	smatrix = smatrix.transpose() + smatrix
+	fmatrix = fmatrix.transpose() + fmatrix
+	np.fill_diagonal(smatrix,np.nan)
+	np.fill_diagonal(fmatrix,np.nan)
+	sm = np.array(sm['ACEfit_Par']['Stats'][0][0]).flatten()
+	fm = np.array(fm['ACEfit_Par']['Stats'][0][0]).flatten()
+	fc_var = np.load('//home/mbmbertolero///gene_expression/fc_var.npy')[:200,:200]
+	np.fill_diagonal(fc_var,np.nan)
+	sc_var = np.load('//home/mbmbertolero///gene_expression/sc_var.npy')[:200,:200]
+	np.fill_diagonal(sc_var,np.nan)
+	sm_nodes, fm_nodes = np.nanmean(smatrix,axis=0)[:200],np.nanmean(fmatrix,axis=0)[:200]
+	fpc = np.load('//home/mbmbertolero//gene_expression/results/fc_pc.npy')[:200]
+	spc = np.load('//home/mbmbertolero//gene_expression/results/sc_pc.npy')[:200]
+
+
+	x,y = fc_node_by_snp[:,fc_top_fits].flatten(),fc_node_by_snp[:,fc_top_fits==False].flatten()
+	i,j = sc_node_by_snp[:,sc_top_fits].flatten(),sc_node_by_snp[:,sc_top_fits==False].flatten()
+	x = x[np.isnan(x) == False]
+	y = y[np.isnan(y) == False]
+	i = i[np.isnan(i) == False]
+	j = j[np.isnan(j) == False]
+
+	t,p = scipy.stats.ttest_ind(x,y)
+	t1,p1 = scipy.stats.ttest_ind(i,j)
+	#plot
+	g = sns.boxenplot(data=[x,y,i,j],palette=[fcpal[0],fcpal[7],scpal[0],scpal[7]])  
+	g.text(.5,1.5,'$\it{t}$=%s\n%s' %(np.around(t,1),log_p_value(p)),{'fontsize':12},horizontalalignment='center')
+	g.text(2.5,1.5,'$\it{t}$=%s\n%s' %(np.around(t1,1),log_p_value(p1)),{'fontsize':12},horizontalalignment='center')
+	g.text(.5,2,'functional',{'fontsize':12,'color':fcpal[0],'fontweight':"bold"},horizontalalignment='center')
+	g.text(2.5,2,'structural',{'fontsize':12,'color':scpal[0],'fontweight':"bold"},horizontalalignment='center')
+	plt.tight_layout()
+	plt.xticks(range(4),['SNP betas @ genes\nthat fit coexpression',"other genes'\nSNP betas",'SNP betas @ genes\nthat fit coexpression',"other genes'\nSNP betas"])
+	sns.despine()
+	plt.savefig('/home/mbmbertolero/gene_expression/figures/fit_snp_v_others.pdf')
+	plt.show()
+	plt.close()
+
+	x,y,i,j = fc_ts,fc_nulls,sc_ts,sc_nulls
+	x = x[np.isnan(x) == False]
+	y = y[np.isnan(y) == False]
+	i = i[np.isnan(i) == False]
+	j = j[np.isnan(j) == False]
+	t,p = scipy.stats.ttest_ind(x,y)
+	t1,p1 = scipy.stats.ttest_ind(i,j)
+	#plot
+	g = sns.boxenplot(data=[x,y,i,j],palette=[fcpal[0],fcpal[7],scpal[0],scpal[7]])  
+	g.text(.5,1.5,'$\it{t}$=%s\n%s' %(np.around(t,1),log_p_value(p)),{'fontsize':12},horizontalalignment='center')
+	g.text(2.5,1.5,'$\it{t}$=%s\n%s' %(np.around(t1,1),log_p_value(p1)),{'fontsize':12},horizontalalignment='center')
+	g.text(.5,4,'functional',{'fontsize':12,'color':fcpal[0],'fontweight':"bold"},horizontalalignment='center')
+	g.text(2.5,4,'structural',{'fontsize':12,'color':scpal[0],'fontweight':"bold"},horizontalalignment='center')
+	plt.tight_layout()
+	sns.despine()
+	plt.xticks(range(4),['t-values',"null t-values",'t-values',"null t values"])
+	plt.savefig('/home/mbmbertolero/gene_expression/figures/nodal_v_null.pdf')
+	plt.show()
+	plt.close()
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default']
+	membership = yeo_membership(components=7)
+
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
+	fig,axes = sns.plt.subplots(2,2,figsize=(7.204724,7.204724),sharex='none',sharey='none')
+	h2=sns.regplot(x=fc_fit_r,y=fc_snp_r,ax=axes[0][1],color=fcpal[0])
+	h1=sns.regplot(x=sc_fit_r,y=sc_snp_r,ax=axes[0][0],color=scpal[0])
+	h4=sns.regplot(x= fm_nodes,y=np.nanmean(fc_node_by_snp,axis=1),ax=axes[1][1],color=fcpal[3])
+	h3=sns.regplot(x= sm_nodes,y=np.nanmean(sc_node_by_snp,axis=1),ax=axes[1][0],color=scpal[3])
+	h3.set_ylim(.3272,.3281)
+
+	r,p=pearsonr(sc_fit_r,sc_snp_r)
+	h1.text(0.65,.1,convert_r_p(r,p),transform=h1.transAxes)
 	
+	r,p=pearsonr(fc_fit_r,fc_snp_r)
+	h2.text(0.65,.1,convert_r_p(r,p),transform=h2.transAxes)
+	
+	r,p=pearsonr(sm_nodes,np.nanmean(sc_node_by_snp,axis=1))
+	h4.text(0.65,.8,convert_r_p(r,p),transform=h3.transAxes)
+	
+	r,p=pearsonr(fm_nodes,np.nanmean(fc_node_by_snp,axis=1))
+	h4.text(0.4,.8,convert_r_p(r,p),transform=h4.transAxes)
 
-	vals = np.nanmean(node_by_snp,axis=1)
+	h1.set_title('structural',color=scpal[2])
+	h2.set_title('functional',color=fcpal[2])
+	h1.set_ylabel("high snp nodes predict behavior")
+	h2.set_xlabel("high fit nodes predict behavior")
+	h1.set_xlabel("high fit nodes predict behavior")
+	h4.set_xlabel("node's mean SNP beta")
+	h3.set_xlabel("node's mean SNP beta")
+	h3.set_ylabel("node's heritability")
+	plt.tight_layout()
+	plt.savefig('/home/mbmbertolero/gene_expression/figures/snp_corrs.pdf')
+	plt.show()
+	plt.close()
+	vals = np.nanmean(fc_node_by_snp,axis=1)
 	vals[np.isnan(vals)] = np.nanmean(vals)
 	max_v,min_v = (np.std(vals)*1) + np.mean(vals), np.mean(vals) - (np.std(vals)*1)
 	write_cifti(atlas_path,'snps',make_heatmap(np.array([vals,vals]).flatten(),dmin=min_v,dmax=max_v))
 
-def connector_gene_figure():
+	fig,axes = sns.plt.subplots(1,2,figsize=(7.204724,7.204724/2.),sharex='none',sharey='none')
+	h2 = sns.regplot(fc_df.groupby('node').fit.mean(),np.nanmean(fc_node_by_snp,axis=1)[mask],ax=axes[1],color=fcpal[0])
+	h1 = sns.regplot(sc_df.groupby('node').fit.mean(),np.nanmean(sc_node_by_snp,axis=1)[mask],ax=axes[0],color=scpal[0])
+	x=np.nanmean(sc_node_by_snp,axis=1)[mask]
+	h1.set_ylim(x.min()-.0001,x.max()+.0001)
+	r,p=pearsonr(sc_df.groupby('node').fit.mean(),np.nanmean(sc_node_by_snp,axis=1)[mask])
+	h1.text(0.65,.8,convert_r_p(r,p),transform=h1.transAxes)
+	r,p=pearsonr(fc_df.groupby('node').fit.mean(),np.nanmean(fc_node_by_snp,axis=1)[mask])
+	h2.text(0.65,.1,convert_r_p(r,p),transform=h2.transAxes)
+
+	h1.set_ylabel("node's mean SNP beta")
+	h2.set_xlabel("node's genetic fit")
+	h1.set_xlabel("node's genetic fit")
+	h1.set_title('structural',color=scpal[2])
+	h2.set_title('functional',color=fcpal[2])
+	plt.tight_layout()
+	plt.savefig('/home/mbmbertolero/gene_expression/figures/snp_fit_corrs.pdf')
+
+	print pearsonr(fpc,np.nanmean(fc_node_by_snp,axis=1))
+	print pearsonr(spc,np.nanmean(sc_node_by_snp,axis=1))
+
+def find_top_pc_gene():
 	r = np.zeros((gene_exp.shape[1]))
 	pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
 	for i in range(len(r)):
@@ -3806,13 +4011,8 @@ if run_type == 'predict':
 if run_type == 'pgwas': prep_gwas(node,matrix,'edges')
 if run_type == 'random': null_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=10000,corr_method = 'pearsonr')
 if run_type == 'random_random': random_genes(matrix,topological=False,distance=True,network=network,n_genes=n_genes,runs=1000,corr_method = 'pearsonr')
-if run_type == 'collapse': csv_to_npy(node)
-
-
-
-
-
-
+if run_type == 'collapse': csv_to_npy(node,matrix)
+if run_type == 'top': top_expression_snp(matrix=matrix)
 
 
 
