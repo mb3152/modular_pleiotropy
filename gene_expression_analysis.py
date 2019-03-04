@@ -42,12 +42,12 @@ import math
 from pandas_plink import read_plink
 from statsmodels.stats.multitest import fdrcorrection
 plt.rcParams['pdf.fonttype'] = 42
-# mpl.font_manager.FontProperties(family='sans-serif',style='oblique',fname='/home/mbmbertolero/data/Helvetica/Helvetica-Oblique.ttf')
-# # mpl.font_manager.FontProperties(family='sans-serif',style='italic',fname='/home/mbmbertolero/data/Helvetica/Helvetica-Oblique.ttf')
-# mpl.font_manager.FontProperties(family='sans-serif',style='normal',fname='/home/mbmbertolero/data/Helvetica/Helvetica.ttf')
+# mpl.font_manager.FontProperties(family='sans-serif',style='oblique',fname='/home/mbmbertolero/data/Open Sans/Open Sans-Oblique.ttf')
+# # mpl.font_manager.FontProperties(family='sans-serif',style='italic',fname='/home/mbmbertolero/data/Open Sans/Open Sans-Oblique.ttf')
+# mpl.font_manager.FontProperties(family='sans-serif',style='normal',fname='/home/mbmbertolero/data/Open Sans/Open Sans.ttf')
 plt.rcParams['font.sans-serif'] = "Open Sans"
 plt.rcParams['mathtext.fontset'] = 'custom'
-# plt.rcParams['mathtext.it'] = 'Helvetica:italic'
+# plt.rcParams['mathtext.it'] = 'Open Sans:italic'
 plt.rcParams['mathtext.it'] = 'Open Sans:italic'
 plt.rcParams['mathtext.cal'] = 'Open Sans'
 
@@ -56,7 +56,8 @@ tmpdir = check_output(['echo $TMPDIR'],shell=True)
 if len(tmpdir.split('\n')[0]) == 0: tmpdir = '/tmp/runtime-mb3152'
 os.environ['XDG_RUNTIME_DIR'] = tmpdir.split('\n')[0]
 
-
+from sklearn.metrics import mutual_info_score
+from sklearn.metrics.cluster import normalized_mutual_info_score
 global cortical
 global cerebellar
 global well_id_2_mni
@@ -137,6 +138,30 @@ atlas_path = '/home/mbmbertolero/data/PUBLIC/yeo/fsLR32k/Schaefer2016_400Parcels
 global nodes_genes
 global snp2genes_df
 
+class GraphDist() :
+    def __init__(self, size, ax, x=True) :
+        self.size = size
+        self.ax = ax
+        self.x = x
+
+    @property
+    def dist_real(self) :
+        x0, y0 = self.ax.transAxes.transform((0, 0)) # lower left in pixels
+        x1, y1 = self.ax.transAxes.transform((1, 1)) # upper right in pixes
+        value = x1 - x0 if self.x else y1 - y0
+        return value
+
+    @property
+    def dist_abs(self) :
+        bounds = self.ax.get_xlim() if self.x else self.ax.get_ylim()
+        return bounds[0] - bounds[1]
+
+    @property
+    def value(self) :
+        return (self.size / self.dist_real) * self.dist_abs
+
+    def __mul__(self, obj) :
+        return self.value * obj
 
 def write_cifti(atlas_path,out_path,colors):
 	os.system('wb_command -cifti-label-export-table %s 1 temp.txt'%(atlas_path))
@@ -441,7 +466,7 @@ def structural_connectivity(topological=False,distance=True,network=None):
 	return matrix
 
 def avg_graph_metrics(matrix,topological=False,distance=True):
-	# sns.set(context="notebook",font='Helvetica',style='white',font_scale=1.5)
+	# sns.set(context="notebook",font='Open Sans',style='white',font_scale=1.5)
 	# reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	# full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
 	# membership = np.zeros((400)).astype(str)
@@ -1079,7 +1104,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 	# Initialize the FacetGrid object
 	if matrix == 'fc': pal = sns.cubehelix_palette(10, rot=.25, light=.7)
 	if matrix == 'sc': pal = sns.cubehelix_palette(10, rot=-.25, light=.7)
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 	g = sns.FacetGrid(df, row="n_genes", hue="n_genes",palette=pal)
 
 	# Draw the densities in a few steps
@@ -1116,7 +1141,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 	df['genetic fit, spearmanr'] = other_df.fit
 
 	n_gene_array = df['number of genes'].unique()
-	sns.set(context="paper",font_scale=1.5,font='Helvetica',style='white',palette="pastel")
+	sns.set(context="paper",font_scale=1.5,font='Open Sans',style='white',palette="pastel")
 	g = sns.lmplot(x="genetic fit, pearsonr", y="genetic fit, spearmanr", col="number of genes", palette=pal,col_wrap=5,hue="number of genes", data=df, fit_reg=True,size=14.3/5.)
 	for idx,ax in enumerate(g.axes):
 		n_genes = n_gene_array[idx]
@@ -1146,7 +1171,7 @@ def pearsonr_v_spearmanr_ge_figure_and_stats(matrix):
 	# df.rename(columns={'n_genes': 'number of genes', 'fit': 'genetic fit'}, inplace=True)
 	# n_gene_array = df['number of genes'].unique()
 
-	# sns.set(context="paper",font_scale=1.75,font='Helvetica',style='white',palette="pastel")
+	# sns.set(context="paper",font_scale=1.75,font='Open Sans',style='white',palette="pastel")
 	# fig = plt.figure(figsize=(14.3,8))
 	# g = sns.violinplot(x="number of genes", y="genetic fit", hue="similarity metric",data=df, palette="pastel",split=True,inner="quartile")
 	# for x in range(len(n_gene_array)):
@@ -1167,7 +1192,7 @@ def co_exp_figure():
 	use_prs = False
 	norm = True
 	corr_method = 'pearsonr'
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
 	membership = np.zeros((400)).astype(str)
@@ -1244,7 +1269,7 @@ def make_fit_df(matrix,use_prs,norm,corr_method,distance=True,topological=False,
 		result_dir = 'snp_results'
 	if source == 'sa':
 		result_dir = 'results'
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
 	membership = np.zeros((400)).astype(str)
@@ -1315,7 +1340,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 	# print pearsonr(fit,fc_df.groupby('node')['participation coefficient'].mean())
 
 
-	sns.set(context="paper",font_scale=1.75,font='Helvetica',style='whitegrid',palette="pastel",color_codes=True)
+	sns.set(context="paper",font_scale=1.75,font='Open Sans',style='whitegrid',palette="pastel",color_codes=True)
 	c1,c2 = sns.cubehelix_palette(10, rot=.25, light=.7)[0],sns.cubehelix_palette(10, rot=-.25, light=.7)[0]
 	fig = plt.figure(figsize=(14.3,8))
 	g = sns.violinplot(x="number of genes", y="genetic fit", hue="connectivity",data=df,split=True,inner="quartile",palette={"functional": c1, "structural": c2},)
@@ -1332,7 +1357,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 	sns.plt.close()
 
 	pal = sns.cubehelix_palette(10, rot=.25, light=.7)
-	sns.set(context="paper",font_scale=1.5,font='Helvetica',style='white',palette="pastel",color_codes=True)
+	sns.set(context="paper",font_scale=1.5,font='Open Sans',style='white',palette="pastel",color_codes=True)
 	g = sns.lmplot(x="genetic fit", y="participation coefficient", col="number of genes", sharex=False,palette=pal, col_wrap=5,hue="number of genes", data=fc_df,size=14.3/5.)
 	for idx,ax in enumerate(g.axes):
 		n_genes = n_gene_array[idx]
@@ -1347,7 +1372,7 @@ def compare_n_genes(corr_method = 'pearsonr'):
 	sns.plt.close()
 
 	pal = sns.cubehelix_palette(10, rot=-.25, light=.7)
-	sns.set(context="paper",font_scale=1.5,font='Helvetica',style='white',palette="pastel",color_codes=True)
+	sns.set(context="paper",font_scale=1.5,font='Open Sans',style='white',palette="pastel",color_codes=True)
 	g = sns.lmplot(x="genetic fit", y="participation coefficient", col="number of genes", sharex=False,palette=pal, col_wrap=5,hue="number of genes", data=sc_df,size=14.3/5.)
 	for idx,ax in enumerate(g.axes):
 		n_genes = n_gene_array[idx]
@@ -1408,7 +1433,7 @@ def consensus_genes(matrix='fc',n_genes=100):
 	corr_method='pearsonr'
 	n_genes = 100
 
-	sns.set(context="notebook",font='Helvetica',style='white',palette="pastel")
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':6}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
 	membership = np.zeros((200)).astype(str)
@@ -1558,7 +1583,7 @@ def convert_gorilla():
 		os.system('mv %s %s'%(f,f[:-3]+ 'csv'))
 
 def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_df=False,n_genes=50):
-	sns.set(context="notebook",font='Helvetica',style='white',font_scale=1.5)
+	sns.set(context="notebook",font='Open Sans',style='white',font_scale=1.5)
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':6}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
 	membership = np.zeros((400)).astype(str)
@@ -1651,7 +1676,7 @@ def plot_fit_results(matrix,corr_method,topological=False,distance=True,return_d
 
 def compare_genetic_fits(corr_method='pearsonr',n_genes=50):
 
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 
 	reduce_dict = {'VisCent':0,'VisPeri':0,'SomMotA':1,'SomMotB':1,'DorsAttnA':2,'DorsAttnB':2,'SalVentAttnA':3,'SalVentAttnB':3,'Limbic':4,'ContA':5,'ContB':5,'ContC':5,'DefaultA':6,'DefaultB':6,'DefaultC':6,'TempPar':7}
 	full_dict = {'VisCent':0,'VisPeri':1,'SomMotA':2,'SomMotB':3,'DorsAttnA':4,'DorsAttnB':5,'SalVentAttnA':6,'SalVentAttnB':7,'Limbic':8,'ContA':9,'ContB':10,'ContC':11,'DefaultA':12,'DefaultB':13,'DefaultC':14,'TempPar':15}
@@ -1710,7 +1735,7 @@ def compare_genetic_fits(corr_method='pearsonr',n_genes=50):
 	sns.despine()
 	sns.plt.savefig('/home/mbmbertolero/gene_expression/figures/fc_and_sc_fits.pdf')
 	sns.plt.show()
-	sns.set(context="notebook",font='Helvetica',style='white',palette="muted")
+	sns.set(context="notebook",font='Open Sans',style='white',palette="muted")
 	fig, subplots = sns.plt.subplots(2,2,figsize=(7.204724,9.72440945))
 	subplots = subplots.flatten()
 	for idx,measure in enumerate(['participation coefficient', 'within community strength', 'strength', 'betweenness']):
@@ -1751,7 +1776,7 @@ def cater(node):
 	model.fit(features[np.arange(size)!=node],measure[np.arange(size)!=node])
 	return model.predict(features[node].reshape(1, -1))
 
-def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=False,cores=40):
+def role_prediction(matrix,prediction='ge',corr_method='pearsonr',distance=True,topological=False,cores=40):
 	global features
 	global measure
 	global layers
@@ -1768,7 +1793,6 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 	colors = np.array([yeo_colors['R'],yeo_colors['G'],yeo_colors['B']]).transpose()[1:,] /256.
 
 
-
 	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default']
 	for i,n in enumerate(yeo_df):
 		# membership[i] = n.split('_')[2]
@@ -1783,65 +1807,82 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 	membership = membership[:200]
 	membership_ints = membership_ints[:200]
 	colors = colors[:200]
-	unique = []
-	genes_found = []
-	df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network'])
-	for node,name,pval,w,d,b,m in zip(range(200),membership,pc,wcd,degree,between,membership):
-		if node in ignore_nodes: continue
-		gene = np.array([])
-		for n_genes in [15,25,35,50,75,100,125,150,175,200]:
-			try:xgene = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
-			except:
-				print n_genes,node
-				continue
-			gene = np.append(gene,xgene)
-			for g in xgene:
-				unique.append(g)
-		df= df.append(pd.DataFrame(np.array([[gene.flatten()],[node],[pval],[w],[d],[b],[m]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network']))
-	# df.gene = df.gene.astype(float)
-	df['participation coefficient'] = df['participation coefficient'].astype(float)
-	df['strength'] = df['strength'].astype(float)
-	df['within community strength'] = df['within community strength'].astype(float)
-	df['betweenness'] = df['betweenness'].astype(float)
-	df.node = df.node.values.astype(int)
-	unique = np.unique(unique)
 
-	features = np.zeros((200,len(unique)))
-	for node in df.node.values:
-		g_array = unique.copy()
-		g_b_array = unique.copy().astype(int)
-		g_b_array[:] = 0
-		for ga in df.gene[df.node==node].values:
-			for g in ga:
-				g_b_array[g_array==g] = g_b_array[g_array==g]  + 1
-		features[node,:] = g_b_array
-	features = features.astype(int)
 
-	g_names = np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
-	np.savetxt('/home/mbmbertolero/gene_expression/ann/masked_names_%s.txt'%(matrix),np.array(g_names)[unique],fmt='%s')
-	1/0
-
-	mask = np.ones((200)).astype(bool)
-	mask[ignore_nodes] = False
-	membership = membership[mask]
-	features = features[mask]
-
+	if prediction == 'ge':
+		unique = []
+		genes_found = []
+		df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network'])
+		for node,name,pval,w,d,b,m in zip(range(200),membership,pc,wcd,degree,between,membership):
+			if node in ignore_nodes: continue
+			gene = np.array([])
+			for n_genes in [15,25,35,50,75,100,125,150,175,200]:
+				try:xgene = np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%(matrix,topological,distance,node,n_genes,use_prs,norm,corr_method))[-1]
+				except:
+					print n_genes,node
+					continue
+				gene = np.append(gene,xgene)
+				for g in xgene:
+					unique.append(g)
+			df= df.append(pd.DataFrame(np.array([[gene.flatten()],[node],[pval],[w],[d],[b],[m]]).transpose(),columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network']))
+		# df.gene = df.gene.astype(float)
+		df['participation coefficient'] = df['participation coefficient'].astype(float)
+		df['strength'] = df['strength'].astype(float)
+		df['within community strength'] = df['within community strength'].astype(float)
+		df['betweenness'] = df['betweenness'].astype(float)
+		df.node = df.node.values.astype(int)
+		unique = np.unique(unique)
+		features = np.zeros((200,len(unique)))
+		for node in df.node.values:
+			g_array = unique.copy()
+			g_b_array = unique.copy().astype(int)
+			g_b_array[:] = 0
+			for ga in df.gene[df.node==node].values:
+				for g in ga:
+					g_b_array[g_array==g] = g_b_array[g_array==g]  + 1
+			features[node,:] = g_b_array
+		features = features.astype(int)
+		mask = np.ones((200)).astype(bool)
+		mask[ignore_nodes] = False
+		membership = membership[mask]
+		features = features[mask]
+		# df = df.groupby('node').mean() #this might break this but I don't care because I alreay ran this
+		
+	if prediction == 'snp':
+		df = pd.DataFrame(columns=['gene','node','participation coefficient','within community strength','strength','betweenness','network'])
+		df['node'] = np.arange(200)
+		df['participation coefficient'] = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))[:200]
+		df['strength'] = np.load('/home/mbmbertolero/data/gene_expression/results/%s_strength.npy'%(matrix))[:200]
+		df['within community strength'] = np.load('/home/mbmbertolero/data/gene_expression/results/%s_wcd.npy'%(matrix))[:200]
+		df['betweenness'] = np.load('/home/mbmbertolero/data/gene_expression/results/%s_between.npy'%(matrix))[:200]
+		gene_names = np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
+		features = np.zeros((200,len(gene_names)))
+		features[:,:] = np.nan
+		for node in range(200):
+			features[node] = np.load('/home/mbmbertolero/data/gene_expression/snp_results/%s_%s_%s_gene_snps_mean.npy'%(components,node,matrix))
+		features= features[:,np.isnan(features)[0]==False]
 	size = features.shape[0]
+	g_names = np.load('/home/mbmbertolero/data//gene_expression/gene_names.npy')
+	# np.savetxt('/home/mbmbertolero/gene_expression/ann/masked_names_%s.txt'%(matrix),np.array(g_names)[unique],fmt='%s')
+	# 1/0
+
+
 	"""
 	predict the nodal values of a node based on which genes maximize its fit to FC
 	"""
 
 	for name in ['participation coefficient','betweenness','strength','within community strength']:
 		measure = np.array(df.groupby('node').mean()[name].values)
+		# measure = df[name]
 		pool = Pool(cores)
 		prediction_array = np.array(pool.map(regress,range(size)))[:,0]
 		del pool
 		print pearsonr(prediction_array,measure)
-		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s.npy'%(matrix,name.replace(' ','_'),corr_method),prediction_array)
-		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s_true.npy'%(matrix,name.replace(' ','_'),corr_method),measure)
+		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s_%s.npy'%(matrix,name.replace(' ','_'),corr_method,prediction),prediction_array)
+		np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s_%s_true.npy'%(matrix,name.replace(' ','_'),corr_method,prediction),measure)
 
-
-	measure = membership_ints[mask]
+	measure = membership_ints
+	if prediction == 'ge': measure = membership_ints[mask]
 
 	# prediction_array = np.zeros((size))
 	# for i,node in enumerate(range(size)):
@@ -1854,12 +1895,12 @@ def role_prediction(matrix,corr_method='pearsonr',distance=True,topological=Fals
 	prediction_array = np.array(pool.map(cater,range(size)))[:,0]
 	# print len(prediction_array[prediction_array==measure])
 	# print f1_score(measure,prediction_array,average='samples')
-	np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s.npy'%(matrix,'networks',corr_method),prediction_array)
+	np.save('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_%s_%s.npy'%(matrix,'networks',corr_method,prediction),prediction_array)
 
 	df = pd.DataFrame(np.array([precision_recall_fscore_support(measure,prediction_array)[2],names]).transpose(),columns=['f-beta','network'])
 
-def plot_role_prediction(matrix = 'fc'):
-	sns.set(context="notebook",font='Helvetica',style='white')
+def plot_role_prediction(matrix = 'fc',prediction_t='snp'):
+	sns.set(context="notebook",font='Open Sans',style='white')
 	distance = True
 	topological = False
 	prediction = 'genetic'
@@ -1885,14 +1926,32 @@ def plot_role_prediction(matrix = 'fc'):
 	mask = np.ones((200)).astype(bool)
 	mask[ignore_nodes] = False
 
-	pc = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'participation_coefficient'))
-	pc_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'participation_coefficient'))
-	strength = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'strength'))
-	strength_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'strength'))
-	wcd = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'within_community_strength'))
-	wcd_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'within_community_strength'))
-	between_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'betweenness'))
-	between = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'betweenness'))
+
+
+	if prediction_t == 'ge':
+
+		pc = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'participation_coefficient'))
+		strength = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'strength'))
+		wcd = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'within_community_strength'))
+		between = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_true.npy'%(matrix,'betweenness'))
+
+		pc_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'participation_coefficient'))
+		strength_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'strength'))
+		wcd_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'within_community_strength'))
+		between_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr.npy'%(matrix,'betweenness'))
+		prediction_array = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_networks_pearsonr.npy'%(matrix))
+	
+	if prediction_t == 'snp':
+
+		pc = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp_true.npy'%(matrix,'participation_coefficient'))
+		strength = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp_true.npy'%(matrix,'strength'))
+		wcd = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp_true.npy'%(matrix,'within_community_strength'))
+		between = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp_true.npy'%(matrix,'betweenness'))
+		pc_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp.npy'%(matrix,'participation_coefficient'))
+		strength_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp.npy'%(matrix,'strength'))
+		wcd_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp.npy'%(matrix,'within_community_strength'))
+		between_p = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_%s_pearsonr_snp.npy'%(matrix,'betweenness'))
+		prediction_array = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_networks_pearsonr_snp.npy'%(matrix))
 
 	df = pd.DataFrame(columns=['node','nodal metric','observed','prediction'])
 	for i in range(len(pc)):
@@ -1916,37 +1975,37 @@ def plot_role_prediction(matrix = 'fc'):
 		g.axes[i].annotate('$\it{r}$=%s\n%s'%(np.around(r,2),log_p_value(p)),xy=(0.7, 0.1), xycoords=g.axes[i].transAxes)
 		g.axes[i].set_title(order[i],color=pal[i])
 	sns.plt.tight_layout()
-	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/new_figures/predict_%s_with_%s.pdf'%(matrix,prediction))
+	sns.plt.savefig('/home/mbmbertolero/data/gene_expression/new_figures/predict_%s_with_%s_%s.pdf'%(matrix,prediction, prediction_t))
 	sns.plt.show()
 
 	yeo_colors = pd.read_csv('/home/mbmbertolero/gene_expression/yeo_colors.txt',header=None,names=['name','r','g','b'],index_col=0)
 	yeo_colors = np.array([yeo_colors['r'],yeo_colors['g'],yeo_colors['b']]).transpose() /256.
 	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default']
 
-	prediction_array = np.load('/home/mbmbertolero/data/gene_expression/norm_results/genetic_%s_networks_pearsonr.npy'%(matrix))
+	
 
 	write_cifti_prediction = np.zeros((400,3))
 	write_cifti_colors = []
 	p_i = 0
 	for i in range(200):
-		if mask[i] == False:
-			write_cifti_colors.append([201/256.,201/256.,201/256.])
-			continue
-		if mask[i] == True:
-			write_cifti_colors.append(yeo_colors[prediction_array[p_i]])
-			p_i =  p_i  + 1
+		# if mask[i] == False:
+		# 	write_cifti_colors.append([201/256.,201/256.,201/256.])
+		# 	continue
+		# if mask[i] == True:
+		# 	write_cifti_colors.append(yeo_colors[prediction_array[p_i]])
+		# 	p_i =  p_i  + 1
+		write_cifti_colors.append(yeo_colors[prediction_array[i]])
 	write_cifti_prediction[:200] = write_cifti_colors
-	write_cifti('/home/mbmbertolero/data/PUBLIC/yeo/fsLR32k/Schaefer2016_400Parcels_17Networks_colors_23_05_16.dlabel.nii','/home/mbmbertolero/gene_expression/new_figures/predict_network_%s'%(matrix),write_cifti_prediction)
-
-	print len(prediction_array[prediction_array==membership_ints[mask]])
+	write_cifti('/home/mbmbertolero/data/PUBLIC/yeo/fsLR32k/Schaefer2016_400Parcels_17Networks_colors_23_05_16.dlabel.nii','/home/mbmbertolero/gene_expression/new_figures/predict_network_%s_%s'%(matrix,prediction_t),write_cifti_prediction)
+	# print len(prediction_array[prediction_array==membership_ints[mask]])
 	write_cifti_real = np.zeros((400,3))
 	write_cifti_colors = []
 	for i in range(200):
-		if mask[i] == False:
-			write_cifti_colors.append([201/256.,201/256.,201/256.])
-			continue
-		if mask[i] == True:
-			write_cifti_colors.append(yeo_colors[membership_ints[i]])
+		# if mask[i] == False:
+		# 	write_cifti_colors.append([201/256.,201/256.,201/256.])
+		# 	continue
+		# if mask[i] == True:
+		write_cifti_colors.append(yeo_colors[membership_ints[i]])
 	write_cifti_real[:200] = write_cifti_colors
 	write_cifti('/home/mbmbertolero/data/PUBLIC/yeo/fsLR32k/Schaefer2016_400Parcels_17Networks_colors_23_05_16.dlabel.nii','/home/mbmbertolero/gene_expression/new_figures/real_network_%s'%(matrix),write_cifti_real)
 	"""
@@ -2791,7 +2850,7 @@ def plot_which_edges(all_b=False):
 	metric='fit'
 	corr_method='pearsonr'
 	n_genes= 50
-	sns.set(context="notebook",font='Helvetica',style='white',palette="pastel")
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
 	subjects = get_subjects(done='matrices')
 	b = behavior(subjects,all_b=all_b)
 	# fc_fit_df = pd.read_csv('/home/mbmbertolero/data/gene_expression/results/%s_fits_df.csv'%('fc'))
@@ -2982,7 +3041,7 @@ def plot_perfomance(all_b=True):
 	# behavior_df = behavior_df.dropna()
 	behavior_df['colors'] = make_heatmap(behavior_df['Prediction Accuracy'].values,'coolwarm',-.3,.3)
 
-	sns.set(context="notebook",font='Helvetica',style='white')
+	sns.set(context="notebook",font='Open Sans',style='white')
 
 	# sns.violinplot(data=behavior_df,y='Prediction Accuracy',x='Connectivity',inner='quartile')
 	print scipy.stats.ttest_ind(behavior_df['Prediction Accuracy'][behavior_df.Connectivity=='functional'],behavior_df['Prediction Accuracy'][behavior_df.Connectivity=='structural'])
@@ -3367,7 +3426,7 @@ def get_paris(matrix,n):
 	return m,top,top_FDR,top_NMI
 
 def paris(matrix,n=15):
-	sns.set(context="notebook",font='Helvetica',style='white',font_scale=1.1)
+	sns.set(context="notebook",font='Open Sans',style='white',font_scale=1.1)
 	c1,c2 = sns.cubehelix_palette(10, rot=.25, light=.7)[0],sns.cubehelix_palette(10, rot=-.25, light=.7)[0]
 	if matrix == 'fc': c = c1
 	else: c = c2
@@ -3601,9 +3660,23 @@ def snp_2_gene_idx():
 		indices = []
 		for gidx,gene in enumerate(gene_names):
 			print gidx
-			indices.append(np.where(df['closest']==gene))	
+			indices.append(np.where(df['closest']==gene))
 		with open("/home/mbmbertolero/gene_expression/indices", "wb") as fp: pickle.dump(indices, fp)
 	return indices
+
+def check_snp_2_gene_idx():
+	with open("/home/mbmbertolero/gene_expression/indices", "rb") as fp: old_indices = pickle.load(fp)
+	gene_names = get_genes()
+	df = pd.read_csv('/home/mbmbertolero/gene_expression/snp_results/snp_%s_%s_%s.P%s.assoc.linear'%('edges',0,'fc',1),header=0,sep='\s+',memory_map=True,usecols=[1,6],engine='c',low_memory=False)
+	gene_names = get_genes()
+	snp2genes_df = snp2genes()
+	snp2genes_df.rename(columns={'snp': 'SNP'}, inplace=True)
+	snp2genes_df=snp2genes_df.drop('chrom',axis=1)
+	df = pd.merge(df,snp2genes_df,on='SNP',how='left')		
+	df = df.dropna()
+	for gidx,gene in enumerate(gene_names):
+		print gidx
+		assert (old_indices[gidx][0] == np.where(df['closest']==gene)[0]).all()
 
 def csv_to_npy(node,matrix='fc',components='edges'):
 	print node
@@ -3637,7 +3710,6 @@ def csv_to_npy(node,matrix='fc',components='edges'):
 	for gidx,gene in enumerate(gene_names):
 		if len(indices[gidx][0]) == 0:continue
 		snp_by_gene[gidx] = np.mean(df[indices[gidx]])
-
 	np.save('/home/mbmbertolero/data/gene_expression/snp_results/%s_%s_%s_gene_snps_mean'%(components,node,matrix),snp_by_gene)
 
 def snp2genes():
@@ -3730,7 +3802,7 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 
 	mean_snp = np.nanmean(node_by_snp,axis=1)
 	corr_method = 'pearsonr'
-	sns.set(context="notebook",font='Helvetica',style='white',palette="pastel")
+	sns.set(context="notebook",font='Open Sans',style='white',palette="pastel")
 	subjects = get_subjects(done='matrices')
 	b = behavior(subjects,all_b=True)
 	columns=['node','snp_r','fit_r','behavioral_measure']
@@ -3752,10 +3824,12 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 	np.save('/home/mbmbertolero/data/gene_expression/snp_results/behav_snp_r_%s'%(matrix),behavior_df.snp_r.values.astype(float))
 	print pearsonr(behavior_df.snp_r,behavior_df.fit_r)
 
-
 	ts = np.zeros((200))
 	null_ts = np.zeros((200,100))
-
+	# node_by_fit = node_by_fit.sum(axis=0)
+	# node_by_fit[node_by_fit==10] = 1
+	# # node_by_fit[node_by_fit!=0] = 1
+	# node_by_fit = node_by_fit.astype(bool)
 	for node in range(200):
 		print node
 		x = node_by_snp[node,node_by_fit[node]==True]
@@ -3765,12 +3839,14 @@ def top_expression_snp(components='edges',matrix='fc',distance = True,use_prs = 
 		ts[node] = scipy.stats.ttest_ind(x,y)[0]
 		n_genes = len(np.where(node_by_fit[node]==True)[0])
 		for null_run in range(100):
+			np.random.seed(int(null_run))
 			random_node_by_fit = np.zeros((len(gene_names))).astype(bool)
 			random_node_by_fit[np.random.choice(len(gene_names),n_genes,replace=False)] = True
 			x = node_by_snp[node,random_node_by_fit==True]
 			y = node_by_snp[node,random_node_by_fit==False]
 			x = x[np.isnan(x) == False]
 			y = y[np.isnan(y) == False]
+
 			null_ts[node,null_run] = scipy.stats.ttest_ind(x,y)[0]
 	print scipy.stats.ttest_ind(ts[np.isnan(ts)==False],null_ts[np.isnan(null_ts)==False])
 	np.save('/home/mbmbertolero/data/gene_expression/snp_results/null_ts_%s'%(matrix),null_ts)
@@ -3786,6 +3862,193 @@ def snp_figure():
 	sc_top_fits_n = np.load('/home/mbmbertolero/data/gene_expression/snp_results/num_fits_sc.npy')
 	fc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_fc.npy')
 	sc_node_by_snp = np.load('/home/mbmbertolero/data/gene_expression/snp_results/node_by_snp_sc.npy')
+
+	n_nodes = 200
+	gene_names = get_genes()
+	fc_node_by_fit_sum = np.zeros((10,n_nodes,len(gene_names))).astype(int)
+	sc_node_by_fit_sum = np.zeros((10,n_nodes,len(gene_names))).astype(int)
+	
+	for node in range(n_nodes):
+		try:
+			for idx,n_genes in enumerate([15,25,35,50,75,100,125,150,175,200]):
+				fc_node_by_fit_sum[idx,node,np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%('fc',False,distance,node,n_genes,use_prs,norm,corr_method))[-1]] = 1
+				sc_node_by_fit_sum[idx,node,np.load('/home/mbmbertolero/data/gene_expression/norm_results/SA_fit_all_%s_%s_%s_%s_%s_%s_%s_%s.npy'%('sc',False,distance,node,n_genes,use_prs,norm,corr_method))[-1]] = 1
+		except:continue
+
+	yeo_colors = pd.read_csv('/home/mbmbertolero/gene_expression/yeo_colors.txt',header=None,names=['name','r','g','b'],index_col=0)
+	yeo_colors = np.array([yeo_colors['r'],yeo_colors['g'],yeo_colors['b']]).transpose() /256.
+	names = ['Visual','Motor','Dorsal Attention','Ventral Attention','Limbic','Control','Default']
+	
+	labels = yeo_membership(7)
+	network_colors = []
+	for c in range(200):
+		network_colors.append(yeo_colors[labels[c]])
+
+	for null in ['shift','spatial']:
+		fc_e_nulls = []
+		fc_snp_nulls = []
+		sc_e_nulls = []
+		sc_snp_nulls = []
+		for matrix in ['fc','sc']:
+			labels = yeo_membership(17)
+			n_nets = 16
+			if matrix == 'fc':
+					em = np.corrcoef(np.sum(fc_node_by_fit_sum,axis=0))
+					snp_m = np.corrcoef(fc_node_by_snp[:,np.isnan(fc_node_by_snp[0])==False])
+			if matrix == 'sc':
+					em = np.corrcoef(np.sum(sc_node_by_fit_sum,axis=0))
+					snp_m = np.corrcoef(sc_node_by_snp[:,np.isnan(sc_node_by_snp[0])==False])
+			
+			np.fill_diagonal(snp_m,0.0)
+			np.fill_diagonal(em,0.0)
+			
+			em[np.isnan(em)] = 0.0
+			snp_m[np.isnan(snp_m)] = 0.0
+			snp_m[snp_m==1] = 0.0
+			
+			snp_m = np.arctanh(snp_m)
+			em = np.arctanh(em)
+
+			e_graph = brain_graphs.matrix_to_igraph(em,0.15)
+			snp_graph = brain_graphs.matrix_to_igraph(snp_m,0.15)
+
+
+			if matrix == 'fc':
+				fc_snp_q_e = snp_graph.community_infomap(edge_weights='weight').modularity
+				fc_e_q_e = e_graph.community_infomap(edge_weights='weight').modularity
+				fc_snp_q = snp_graph.modularity(labels, weights='weight')
+				fc_e_q = e_graph.modularity(labels, weights='weight')
+			if matrix == 'sc':
+				sc_snp_q = snp_graph.modularity(labels, weights='weight')
+				sc_e_q = e_graph.modularity(labels, weights='weight')
+				sc_snp_q_e = snp_graph.community_infomap(edge_weights='weight').modularity
+				sc_e_q_e = e_graph.community_infomap(edge_weights='weight').modularity
+
+
+			dm = atlas_distance()[:200,:200]
+			dm = abs(dm - dm.max())
+			i = 0
+			break_flag = False
+			while True:
+				# print i
+				if null == 'shift':
+					r_labels = labels.copy()
+					# np.random.shuffle(r_labels)
+					r_labels = np.roll(r_labels,np.random.choice(199,1))
+				if null == 'spatial':
+					r_labels = np.zeros((200))
+					r_labels[:] = np.nan
+					r_labels[np.random.choice(200,n_nets,replace=False).astype(int)] = np.arange(n_nets)
+					for n in np.random.choice(200,200,replace=False):
+						p = dm[n].copy()
+						p[n] = 0
+						p[np.isnan(r_labels)] = 0.0
+						r_labels[n] = r_labels[np.argmax(p)]
+					if min(np.unique(r_labels,return_counts=True)[1]) <= 5:continue
+					if break_flag:
+						break_flag = False
+						continue
+				if normalized_mutual_info_score(r_labels,labels)==1:continue
+				i = i + 1 
+				if matrix == 'sc':
+					sc_snp_nulls.append(snp_graph.modularity(r_labels, weights='weight'))
+					sc_e_nulls.append(e_graph.modularity(r_labels, weights='weight'))
+				if matrix == 'fc':
+					fc_snp_nulls.append(snp_graph.modularity(r_labels, weights='weight'))
+					fc_e_nulls.append(e_graph.modularity(r_labels, weights='weight'))
+				if i == 10000:break
+		
+		print scipy.stats.ttest_1samp(fc_snp_nulls,fc_snp_q)
+		print scipy.stats.ttest_1samp(fc_e_nulls,fc_e_q)
+
+		print scipy.stats.ttest_1samp(sc_snp_nulls,sc_snp_q)
+		print scipy.stats.ttest_1samp(sc_e_nulls,sc_e_q)
+
+
+
+
+		x,y,i,j = fc_e_nulls,fc_snp_nulls,sc_e_nulls,sc_snp_nulls
+		x.append(fc_e_q)
+		y.append(fc_snp_q)
+		i.append(sc_e_q)
+		j.append(sc_snp_q)
+		x.append(fc_e_q_e)
+		y.append(fc_snp_q_e)
+		i.append(sc_e_q_e)
+		j.append(sc_snp_q_e)
+		g = sns.boxenplot(data=[x,y,i,j],palette=[fcpal[0],fcpal[7],scpal[0],scpal[7]])
+
+
+		g.plot(0,fc_e_q,'s',fillstyle='none',markersize=10,c=fcpal[0])
+		g.plot(1,fc_snp_q,'s',fillstyle='none',markersize=10,c=fcpal[7])
+		g.plot(2,sc_e_q,'s',fillstyle='none',markersize=10,c=scpal[0])
+		g.plot(3,sc_snp_q,'s',fillstyle='none',markersize=10,c=scpal[7])
+
+		g.plot(0,fc_e_q_e,'bo',fillstyle='none',markersize=10,c=fcpal[0])
+		g.plot(1,fc_snp_q_e,'bo',fillstyle='none',markersize=10,c=fcpal[7])
+		g.plot(2,sc_e_q_e,'bo',fillstyle='none',markersize=10,c=scpal[0])
+		g.plot(3,sc_snp_q_e,'bo',fillstyle='none',markersize=10,c=scpal[7])
+
+
+
+		if null == 'shift':
+			g.plot(0,.035,'bo',fillstyle='none',markersize=10,c='black')
+			g.plot(0,.05,'s',fillstyle='none',markersize=10,c='black')
+			g.text(0.5,.035,'emperical',{'fontsize':12,'fontweight':"bold"},horizontalalignment='center',verticalalignment='center')
+			g.text(0.5,.05,'a priori',{'fontsize':12,'fontweight':"bold"},horizontalalignment='center',verticalalignment='center')
+
+
+		if null == 'spatial':
+			g.plot(2.5,.175,'s',fillstyle='none',markersize=10,c='black')
+			g.plot(2.5,.16,'bo',fillstyle='none',markersize=10,c='black')
+			g.text(3,.175,'a priori',{'fontsize':12,'fontweight':"bold"},horizontalalignment='center',verticalalignment='center')
+			g.text(3,.16,'emperical',{'fontsize':12,'fontweight':"bold"},horizontalalignment='center',verticalalignment='center')
+
+		g.text(.5,.16,'functional',{'fontsize':12,'color':fcpal[0],'fontweight':"bold"},horizontalalignment='center')
+		g.text(2.5,.13,'structural',{'fontsize':12,'color':scpal[0],'fontweight':"bold"},horizontalalignment='center')
+		# plt.tight_layout()
+		plt.xticks(range(4),['coexpression matrix',"SNP matrix",'coexpression matrix',"SNP matrix"])
+		sns.despine()
+		sns.plt.tight_layout()
+		plt.savefig('/home/mbmbertolero/gene_expression/figures/Q_v_%s_null.pdf'%(null))
+		plt.show()
+		# plt.close()
+
+
+	for matrix in ['fc','sc']:
+		if matrix == 'fc':
+				em = np.corrcoef(np.sum(fc_node_by_fit_sum,axis=0))
+				snp_m = np.corrcoef(fc_node_by_snp[:,np.isnan(fc_node_by_snp[0])==False])
+		if matrix == 'sc':
+				em = np.corrcoef(np.sum(sc_node_by_fit_sum,axis=0))
+				snp_m = np.corrcoef(sc_node_by_snp[:,np.isnan(sc_node_by_snp[0])==False])
+				
+		np.fill_diagonal(snp_m,0.0)
+		np.fill_diagonal(em,0.0)
+		
+		em[np.isnan(em)] = 0.0
+		snp_m[np.isnan(snp_m)] = 0.0
+		snp_m[snp_m==1] = 0.0
+		
+		snp_m = np.arctanh(snp_m)
+		em = np.arctanh(em)
+		import matplotlib.patches as patches
+		g = sns.clustermap(em,vmin=.025,row_cluster=False, col_cluster=False,row_colors=network_colors, col_colors=network_colors,linewidths=0, xticklabels=False, yticklabels=False,rasterized=True)
+		for i,network,color, in zip(np.arange(len(labels)),labels,network_colors):
+			if network != labels[i - 1]:
+				g.ax_heatmap.add_patch(patches.Rectangle((i+len(labels[labels==network]),(i+len(labels[labels==network]))),len(labels[labels==network]),len(labels[labels==network]),facecolor="none",edgecolor=color,linewidth="1",angle=180))
+		plt.savefig('/home/mbmbertolero/gene_expression/figures/e_matrix_%s.pdf'%(matrix),rasterized=True)
+		plt.close()
+		g = sns.clustermap(snp_m,vmin=4.2,row_cluster=False, col_cluster=False,row_colors=network_colors, col_colors=network_colors,linewidths=0, xticklabels=False, yticklabels=False,rasterized=True)
+		for i,network,color, in zip(np.arange(len(labels)),labels,network_colors):
+			if network != labels[i - 1]:
+				g.ax_heatmap.add_patch(patches.Rectangle((i+len(labels[labels==network]),(i+len(labels[labels==network]))),len(labels[labels==network]),len(labels[labels==network]),facecolor="none",edgecolor=color,linewidth="1",angle=180))
+		plt.savefig('/home/mbmbertolero/gene_expression/figures/snp_matrix_%s.pdf'%(matrix))
+		plt.close()
+
+
+
+
 
 
 	fc_fits = np.zeros((58))
@@ -3891,6 +4154,7 @@ def snp_figure():
 	plt.tight_layout()
 	plt.xticks(range(4),['SNP betas @ genes\nthat fit coexpression',"other genes'\nSNP betas",'SNP betas @ genes\nthat fit coexpression',"other genes'\nSNP betas"])
 	sns.despine()
+	sns.plt.tight_layout()
 	plt.savefig('/home/mbmbertolero/gene_expression/figures/fit_snp_v_others.pdf')
 	plt.show()
 	plt.close()
