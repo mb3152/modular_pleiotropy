@@ -3911,7 +3911,12 @@ def snp_figure():
 
 			e_graph = brain_graphs.matrix_to_igraph(em,0.15)
 			snp_graph = brain_graphs.matrix_to_igraph(snp_m,0.15)
+			pc = np.load('/home/mbmbertolero/data/gene_expression/results/%s_pc.npy'%(matrix))
+			print nan_pearsonr(brain_graphs.brain_graph(snp_graph.community_fastgreedy(weights='weight').as_clustering()).pc,pc[:200])
+			print nan_pearsonr(brain_graphs.brain_graph(e_graph.community_fastgreedy(weights='weight').as_clustering()).pc,pc[:200])
 
+			print nan_pearsonr(brain_graphs.brain_graph(VertexClustering(snp_graph,labels)).pc,pc[:200])
+			print nan_pearsonr(brain_graphs.brain_graph(VertexClustering(e_graph,labels)).pc,pc[:200])
 
 			if matrix == 'fc':
 				fc_snp_q_e = snp_graph.community_infomap(edge_weights='weight').modularity
